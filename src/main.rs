@@ -149,12 +149,13 @@ fn main() -> Result<()> {
             }
 
             let block = Block::default()
-                // Первый заголовок слева (Название и версия)
+                // Левая часть (пусто или можно добавить что-то еще)
+                // Центральная часть: Имя файла
+                .title(Title::from(format!(" {} ", app.filename.file_name().unwrap_or_default().to_string_lossy()))
+                    .alignment(Alignment::Center))
+                // Правая часть: Название и версия
                 .title(Title::from(format!(" rink v{} ", env!("CARGO_PKG_VERSION")))
                     .alignment(Alignment::Right))
-                // Второй заголовок по центру (Название файла)
-                .title(Title::from(format!(" {} ", app.filename.display()))
-                    .alignment(Alignment::Center))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .style(Style::default().fg(Color::Cyan));

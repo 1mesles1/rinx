@@ -1,0 +1,28 @@
+name: Build Release
+on:
+  push:
+    tags:
+      - 'v*' # должен сработать при изменении версии
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release
+      - name: Upload Artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/release/rink
+            target/release/rink.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
