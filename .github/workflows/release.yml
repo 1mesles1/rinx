@@ -1,8 +1,12 @@
-name: Build Release
+name: Release
+
 on:
   push:
     tags:
-      - 'v*' # должен сработать при изменении версии
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -10,19 +14,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: rink
+          - os: windows-latest
+            artifact_name: rink.exe
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
       - name: Build
         run: cargo build --release
-      - name: Upload Artifacts
+
+      - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            target/release/rink
-            target/release/rink.exe
+          files: target/release/${{ matrix.artifact_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
