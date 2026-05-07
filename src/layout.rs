@@ -1,5 +1,5 @@
 use crate::fb2_parser::Paragraph;
-use textwrap::{fill, Options};
+use textwrap::{Options, fill};
 
 pub fn prepare_layout(paragraphs: &[Paragraph], width: u16) -> (Vec<String>, Vec<(String, usize)>) {
     let mut new_lines = Vec::new();
@@ -8,7 +8,7 @@ pub fn prepare_layout(paragraphs: &[Paragraph], width: u16) -> (Vec<String>, Vec
 
     for p in paragraphs {
         let content = p.as_string_fallback();
-        
+
         // Если в строке нет ни одной буквы или цифры — это пустой мусор, пропускаем
         if !content.chars().any(|c| c.is_alphanumeric()) {
             continue;
@@ -20,7 +20,7 @@ pub fn prepare_layout(paragraphs: &[Paragraph], width: u16) -> (Vec<String>, Vec
                 if !new_lines.is_empty() && new_lines.last() != Some(&"".to_string()) {
                     new_lines.push("".to_string());
                 }
-                
+
                 new_toc.push((text.clone(), new_lines.len()));
 
                 let title_text = text.trim().to_uppercase();
@@ -36,7 +36,9 @@ pub fn prepare_layout(paragraphs: &[Paragraph], width: u16) -> (Vec<String>, Vec
             Paragraph::Body(text) => {
                 let t = text.trim();
                 // Если в параграфе нет букв/цифр, вообще его не печатаем
-                if !t.chars().any(|c| c.is_alphanumeric()) { continue; }
+                if !t.chars().any(|c| c.is_alphanumeric()) {
+                    continue;
+                }
 
                 let options = Options::new(w);
                 let wrapped = fill(t, options);
@@ -46,7 +48,11 @@ pub fn prepare_layout(paragraphs: &[Paragraph], width: u16) -> (Vec<String>, Vec
                 for (i, line) in lines.into_iter().enumerate() {
                     let formatted = if i == 0 {
                         let first_line = format!("  {}", line);
-                        if len == 1 { first_line } else { justify_line(&first_line, w) }
+                        if len == 1 {
+                            first_line
+                        } else {
+                            justify_line(&first_line, w)
+                        }
                     } else if i < len - 1 {
                         justify_line(line, w)
                     } else {
@@ -62,7 +68,9 @@ pub fn prepare_layout(paragraphs: &[Paragraph], width: u16) -> (Vec<String>, Vec
 
             _ => {
                 let s = p.as_string_fallback().trim();
-                if s.is_empty() { continue; }
+                if s.is_empty() {
+                    continue;
+                }
                 let wrapped = fill(s, w.saturating_sub(8));
                 for line in wrapped.lines() {
                     new_lines.push(format!("    {}", line));
@@ -78,13 +86,17 @@ pub fn justify_line(line: &str, width: usize) -> String {
     let indent = if line.starts_with("  ") { "  " } else { "" };
     let text_part = line.trim();
     let words: Vec<&str> = text_part.split_whitespace().collect();
-    
-    if words.len() <= 1 { return line.to_string(); }
+
+    if words.len() <= 1 {
+        return line.to_string();
+    }
 
     let indent_len = indent.chars().count();
     let total_chars: usize = words.iter().map(|w| w.chars().count()).sum();
-    
-    if total_chars + indent_len >= width { return line.to_string(); }
+
+    if total_chars + indent_len >= width {
+        return line.to_string();
+    }
 
     let total_spaces = width - total_chars - indent_len;
     let gaps = words.len() - 1;
@@ -95,20 +107,31 @@ pub fn justify_line(line: &str, width: usize) -> String {
     for (i, word) in words.iter().enumerate() {
         result.push_str(word);
         if i < gaps {
-            let n = if i < remainder { space_width + 1 } else { space_width };
+            let n = if i < remainder {
+                space_width + 1
+            } else {
+                space_width
+            };
             result.push_str(&" ".repeat(n));
         }
     }
     result
 }
 
-trait AsString { fn as_string_fallback(&self) -> &str; }
+trait AsString {
+    fn as_string_fallback(&self) -> &str;
+}
 impl AsString for Paragraph {
     fn as_string_fallback(&self) -> &str {
         match self {
-            Paragraph::Title(s) | Paragraph::Body(s) | Paragraph::Poem(s) | 
-            Paragraph::Epigraph(s) | Paragraph::Cite(s) | Paragraph::Subtitle(s) | 
-            Paragraph::Author(s) | Paragraph::EmphasisBlock(s) => s,
+            Paragraph::Title(s)
+            | Paragraph::Body(s)
+            | Paragraph::Poem(s)
+            | Paragraph::Epigraph(s)
+            | Paragraph::Cite(s)
+            | Paragraph::Subtitle(s)
+            | Paragraph::Author(s)
+            | Paragraph::EmphasisBlock(s) => s,
         }
     }
 }

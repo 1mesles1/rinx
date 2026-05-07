@@ -1,6 +1,6 @@
 [package]
 name = "rink"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
@@ -16,3 +16,4 @@ zip = "0.6"      # Для работы с архивами .zip
 regex = "1"      # Для работы с регулярными выражениями
 textwrap = { version = "0.16.2", features = ["unicode-width"] }
 encoding_rs = "0.8.35"
+walkdir = "2"

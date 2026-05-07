@@ -1,11 +1,11 @@
 // src/fb2_parser.rs
 
+use anyhow::Result;
+use roxmltree::{Document, Node};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
-use anyhow::Result;
-use roxmltree::{Document, Node};
 use zip::ZipArchive;
 
 #[derive(Debug, Default)]
@@ -15,6 +15,7 @@ pub struct BookMeta {
     pub series: String,
     pub annotation: String,
     pub publish: String,
+    pub sequence_number: i32,
 }
 
 #[derive(Debug)]
@@ -60,7 +61,8 @@ impl FB2Parser {
         if filename.to_string_lossy().to_lowercase().ends_with(".zip") {
             let file = File::open(filename)?;
             let mut archive = ZipArchive::new(file)?;
-            let fb2_name = archive.file_names()
+            let fb2_name = archive
+                .file_names()
                 .find(|n| n.to_lowercase().ends_with(".fb2"))
                 .map(|n| n.to_string());
 
@@ -89,27 +91,58 @@ impl FB2Parser {
     }
 
     fn _extract_all(&mut self, root: Node, unknown_author: &str) {
-        if let Some(ti) = root.descendants().find(|n| n.tag_name().name() == "title-info") {
+        if let Some(ti) = root
+            .descendants()
+            .find(|n| n.tag_name().name() == "title-info")
+        {
             if let Some(t_el) = ti.children().find(|n| n.tag_name().name() == "book-title") {
                 self.meta.title = self._get_text_with_notes(t_el);
             }
-            
+
             // Сбор автора
             if let Some(auth) = ti.children().find(|n| n.tag_name().name() == "author") {
-                let fn_ = auth.children().find(|n| n.tag_name().name() == "first-name").and_then(|n| n.text()).unwrap_or("");
-                let mn_ = auth.children().find(|n| n.tag_name().name() == "middle-name").and_then(|n| n.text()).unwrap_or("");
-                let ln_ = auth.children().find(|n| n.tag_name().name() == "last-name").and_then(|n| n.text()).unwrap_or("");
-                
-                let full_name = format!("{} {} {}", fn_, mn_, ln_).replace("  ", " ").trim().to_string();
-                self.meta.author = if full_name.is_empty() { unknown_author.to_string() } else { full_name };
+                let fn_ = auth
+                    .children()
+                    .find(|n| n.tag_name().name() == "first-name")
+                    .and_then(|n| n.text())
+                    .unwrap_or("");
+                let mn_ = auth
+                    .children()
+                    .find(|n| n.tag_name().name() == "middle-name")
+                    .and_then(|n| n.text())
+                    .unwrap_or("");
+                let ln_ = auth
+                    .children()
+                    .find(|n| n.tag_name().name() == "last-name")
+                    .and_then(|n| n.text())
+                    .unwrap_or("");
+
+                let full_name = format!("{} {} {}", fn_, mn_, ln_)
+                    .replace("  ", " ")
+                    .trim()
+                    .to_string();
+                self.meta.author = if full_name.is_empty() {
+                    unknown_author.to_string()
+                } else {
+                    full_name
+                };
             }
 
             if let Some(ann) = ti.children().find(|n| n.tag_name().name() == "annotation") {
                 self.meta.annotation = self._get_text_with_notes(ann);
             }
-            
+
+            // Находим тег sequence
             if let Some(seq) = ti.children().find(|n| n.tag_name().name() == "sequence") {
+                // Достаем название серии
                 self.meta.series = seq.attribute("name").unwrap_or("").to_string();
+
+                // Достаем номер серии
+                // В roxmltree атрибуты достаются через .attribute("имя")
+                self.meta.sequence_number = seq
+                    .attribute("number")
+                    .and_then(|n| n.parse::<i32>().ok())
+                    .unwrap_or(0);
             }
         }
 
@@ -117,7 +150,8 @@ impl FB2Parser {
             if body.attribute("name") == Some("notes") {
                 for sec in body.children().filter(|n| n.tag_name().name() == "section") {
                     if let Some(id) = sec.attribute("id") {
-                        self.notes.insert(id.to_string(), self._get_text_with_notes(sec));
+                        self.notes
+                            .insert(id.to_string(), self._get_text_with_notes(sec));
                     }
                 }
             } else {
@@ -146,11 +180,13 @@ impl FB2Parser {
                         }
                         self.paragraphs.push(Paragraph::Title(text));
                     }
-                },
+                }
                 "p" | "v" | "text-author" | "subtitle" => {
                     let text = self._get_text_with_notes(child);
                     if !text.is_empty() {
-                        if text.chars().all(|c| c == '*' || c.is_whitespace()) && text.matches('*').count() >= 3 {
+                        if text.chars().all(|c| c == '*' || c.is_whitespace())
+                            && text.matches('*').count() >= 3
+                        {
                             self.paragraphs.push(Paragraph::Body(text));
                             continue;
                         }
@@ -165,12 +201,14 @@ impl FB2Parser {
                         };
                         self.paragraphs.push(new_paragraph);
                     }
-                },
+                }
                 "empty-line" => {
                     // Оставляем как маркер, если нужно, но layout это отфильтрует
                     self.paragraphs.push(Paragraph::Body("".to_string()));
-                },
-                _ => { self._walk(child, next_mode); }
+                }
+                _ => {
+                    self._walk(child, next_mode);
+                }
             }
         }
     }
