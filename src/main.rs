@@ -4,7 +4,6 @@ use crate::fb2_parser::FB2Parser;
 use anyhow::Result;
 use crossterm::execute;
 use crossterm::{
-    ExecutableCommand,
     event::{self, Event, KeyCode, KeyEventKind},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -153,6 +152,9 @@ struct App {
     library_results: Vec<PathBuf>, // Список путей книг для отображения
     library_index: usize,          // Курсор в списке книг
     sort_mode: SortMode,
+    theme_color: ratatui::style::Color,
+    search_library_query: String,
+    library_state: ListState,
 }
 
 // Константы для ширины
@@ -162,6 +164,15 @@ const WIDTH_STEP: u16 = 5;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    
+    if args.iter().any(|a| a == "-v" || a == "`--version") {
+        println!("rink {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("? - помощь\no - настройки");
+        return Ok(());
+    }
     let mut library = Library::load();
 
     let (filepath, start_state) = if args.len() > 1 {
@@ -222,6 +233,9 @@ fn main() -> Result<()> {
         library_results: Vec::new(), // Просто создаем пустой вектор
         library_index: 0,
         sort_mode: SortMode::Title,
+        theme_color: ratatui::style::Color::Cyan,
+        search_library_query: String::new(),
+        library_state: ListState::default(),
     };
 
     // ПЕРВЫЙ LAYOUT
@@ -232,6 +246,7 @@ fn main() -> Result<()> {
     app.toc = toc;
 
     // Основной цикл
+   let tick_rate = std::time::Duration::from_millis(30); // ~33 FPS достаточно для читалки
     while !app.should_quit {
         terminal.draw(|f| {
             let chunks = Layout::default()
@@ -279,23 +294,22 @@ fn main() -> Result<()> {
                 )
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .style(Style::default().fg(Color::Cyan));
+                .style(Style::default().fg(app.theme_color)); 
 
-            // Собираем строки, обрабатывая заголовки (желтый цвет) и добавляя отступ слева
+            // 2. Берем только видимые строки
+            let view_height = chunks[0].height.saturating_sub(2) as usize; 
+
+            // хз, но тоже для скорости и только видимые строки
             let display_lines: Vec<Line> = app
                 .lines
                 .iter()
-                .enumerate()
-                .map(|(_idx, s)| {
+                .skip(app.scroll)
+                .take(view_height) // <--- Теперь компилятор её увидит
+                .map(|s| {
                     let is_header = s.starts_with("^:");
                     let base_text = if is_header { &s[2..] } else { s };
 
-                    // Если строка пустая или мы ничего не ищем — просто выводим как раньше
-                    if app.search_query.is_empty()
-                        || !base_text
-                            .to_lowercase()
-                            .contains(&app.search_query.to_lowercase())
-                    {
+                    if app.search_query.is_empty() || !base_text.to_lowercase().contains(&app.search_query.to_lowercase()) {
                         let style = if is_header {
                             Style::default().fg(Color::Yellow).bold()
                         } else {
@@ -306,36 +320,31 @@ fn main() -> Result<()> {
                             Span::styled(base_text.to_string(), style),
                         ])
                     } else {
-                        // Логика подсветки совпадений
                         let mut spans = vec![Span::raw(" ")];
                         let query = app.search_query.to_lowercase();
                         let text_low = base_text.to_lowercase();
                         let mut last_pos = 0;
 
                         for (start, part) in text_low.match_indices(&query) {
-                            // Текст ДО совпадения
                             if start > last_pos {
-                                spans.push(Span::raw(&base_text[last_pos..start]));
+                                spans.push(Span::raw(base_text[last_pos..start].to_string()));
                             }
-                            // САМО совпадение (выделяем цветом)
                             let style = Style::default().bg(Color::Red).fg(Color::White).bold();
-                            spans.push(Span::styled(&base_text[start..start + part.len()], style));
+                            spans.push(Span::styled(base_text[start..start + part.len()].to_string(), style));
                             last_pos = start + part.len();
                         }
-
-                        // Оставшийся текст ПОСЛЕ последнего совпадения
                         if last_pos < base_text.len() {
-                            spans.push(Span::raw(&base_text[last_pos..]));
+                            spans.push(Span::raw(base_text[last_pos..].to_string()));
                         }
-
                         Line::from(spans)
                     }
                 })
-                .collect(); // Закрыли map
+                .collect();
 
+            // 3. ВАЖНО: У виджета Paragraph теперь скролл всегда (0, 0)
             let text_widget = Paragraph::new(display_lines)
                 .block(block)
-                .scroll((app.scroll as u16, 0));
+                .scroll((0, 0));
 
             f.render_widget(text_widget, horizontal_chunks[1]);
 
@@ -374,55 +383,28 @@ fn main() -> Result<()> {
                 );
 
                 f.render_widget(config_list, area);
-            } // <--- Закрыли Config
+            } // <--- Закрыли Config. заебало.
 
             // --- ОКНО БИБЛИОТЕКИ ---
             if let AppState::Library = app.state {
                 let area = centered_rect(60, 70, f.size());
                 f.render_widget(Clear, area);
 
-                // Создаем текст заголовка
                 let sort_label = match app.sort_mode {
                     SortMode::Title => "Названию",
                     SortMode::Author => "Автору",
                     SortMode::Series => "Циклу",
                 };
 
-                // Создаем список элементов (items)
-                let items: Vec<ListItem> = app
-                    .library_results
-                    .iter()
-                    .map(|path| {
-                        let info = app.library.books.get(path);
-                        let title = info.map(|i| i.title.as_str()).unwrap_or("Без названия");
-                        let author = info.map(|i| i.author.as_str()).unwrap_or("Неизвестен");
-                        let series = info.map(|i| i.series.as_str()).unwrap_or("");
-                        let s_num = info.map(|i| i.series_num).unwrap_or(0);
+                let title_text = if app.is_searching {
+                    format!(" ПОИСК ({}): {}_ ", sort_label, app.search_library_query)
+                } else if !app.search_library_query.is_empty() {
+                    format!(" РЕЗУЛЬТАТЫ ({}): {} [Esc - сброс] ", sort_label, app.search_library_query)
+                } else {
+                    format!(" МОЯ БИБЛИОТЕКА [Сортировка по: {}] ", sort_label)
+                };
 
-                        // Формируем строку в зависимости от режима сортировки
-                        let display_string = match app.sort_mode {
-                            SortMode::Author => format!(" ⎧≣⎨ {} — {}", author, title),
-                            SortMode::Series => {
-                                if series.is_empty() {
-                                    format!(" ⎧≣⎨ {}", title)
-                                } else {
-                                    // Используем s_num здесь:
-                                    format!(" ⎧≣⎨ ({} #{}) {}", series, s_num, title)
-                                }
-                            }
-                            SortMode::Title => format!(" ⎧≣⎨ {} — {}", title, author),
-                        };
-
-                        ListItem::new(display_string)
-                    })
-                    .collect();
-
-                // создаем состояние списка (state)
-                let mut state = ListState::default();
-                state.select(Some(app.library_index));
-
-                let selected_path = app
-                    .library_results
+                let selected_path = app.library_results
                     .get(app.library_index)
                     .map(|p| {
                         let mut p_str = p.to_string_lossy().to_string();
@@ -436,15 +418,46 @@ fn main() -> Result<()> {
                     })
                     .unwrap_or_else(|| "...".into());
 
-                // В самом виджете List добавляем вторую плашку заголовка вниз
+                let items: Vec<ListItem> = app.library_results
+                    .iter()
+                    .filter(|path| {
+                        if app.search_library_query.is_empty() { return true; }
+                        let info = app.library.books.get(*path);
+                        let q = app.search_library_query.to_lowercase();
+                        match app.sort_mode {
+                            SortMode::Title => info.map(|i| i.title.to_lowercase().contains(&q)).unwrap_or_default(),
+                            SortMode::Author => info.map(|i| i.author.to_lowercase().contains(&q)).unwrap_or_default(),
+                            SortMode::Series => info.map(|i| i.series.to_lowercase().contains(&q)).unwrap_or_default(),
+                        }
+                    })
+                    .map(|path| {
+                        let info = app.library.books.get(path);
+                        let title = info.map(|i| i.title.as_str()).unwrap_or("Без названия");
+                        let author = info.map(|i| i.author.as_str()).unwrap_or("Неизвестен");
+                        let series = info.map(|i| i.series.as_str()).unwrap_or("");
+                        let s_num = info.map(|i| i.series_num).unwrap_or(0);
+
+                        let display_string = match app.sort_mode {
+                            SortMode::Author => format!(" {} — {}", author, title),
+                            SortMode::Series => {
+                                if series.is_empty() { format!(" {}", title) } 
+                                else { format!(" ({}, #{}) {}", series, s_num, title) }
+                            }
+                            SortMode::Title => format!(" {} — {}", title, author),
+                        };
+                        ListItem::new(display_string)
+                    })
+                    .collect();
+
+                app.library_state.select(Some(app.library_index));
+
                 let list = List::new(items)
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
                             .border_type(BorderType::Double)
-                            .title(format!(" МОЯ БИБЛИОТЕКА [Сортировка по: {}] ", sort_label))
+                            .title(title_text)
                             .title_alignment(Alignment::Center)
-                            // ПУТЬ В ФОРМАТЕ ~/ ВНИЗУ ПО ЦЕНТРУ
                             .title(
                                 Title::from(format!(" {} ", selected_path))
                                     .alignment(Alignment::Center)
@@ -452,13 +465,13 @@ fn main() -> Result<()> {
                             ),
                     )
                     .highlight_style(Style::default().bg(Color::Green).fg(Color::Black))
-                    .highlight_symbol(">> ");
+                    .highlight_symbol(">> ")
+                    .scroll_padding(10); 
 
-                // 4. Отрисовываем всё это
-                f.render_stateful_widget(list, area, &mut state);
-            }
+                f.render_stateful_widget(list, area, &mut app.library_state);
+            } // <--- ЗДЕСЬ БЛОК БИБЛИОТЕКИ ЗАКРЫВАЕТСЯ
 
-            // 2. Потом блок Ввода пути (со своими расчетами внутри)
+            // СРАЗУ ПОСЛЕ ИДЕТ СЛЕДУЮЩИЙ БЛОК
             if let AppState::InputPath = app.state {
                 let v_chunks = Layout::default()
                     .direction(Direction::Vertical)
@@ -527,37 +540,61 @@ fn main() -> Result<()> {
 
             f.render_widget(
                 Paragraph::new(format!(" |==| W:{:<3}{}", app.width, m_tag))
-                    .style(Style::default().bg(Color::Blue).fg(Color::White)),
-                status_chunks[0],
+                    .style(Style::default().bg(app.theme_color).fg(Color::Black)),
+                status_chunks[0] // Убрал лишние скобки отсюда
             );
 
-            // ЦЕНТРАЛЬНАЯ ЧАСТЬ (Название и кодировка)
+            // ЦЕНТРАЛЬНАЯ ЧАСТЬ
             f.render_widget(
                 Paragraph::new(format!("{} [{}]", app.parser.meta.title, encoding))
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(Color::Blue).fg(Color::White)),
-                status_chunks[1],
+                    .style(Style::default().bg(app.theme_color).fg(Color::Black)),
+                status_chunks[1]
             );
 
-            // ПРАВАЯ ЧАСТЬ (Прогресс без прыжков)
-            // {:>3} резервирует 3 символа под цифры, чтобы текст не прыгал при 9% -> 10%
+            // ПРАВАЯ ЧАСТЬ
             f.render_widget(
                 Paragraph::new(format!("{} {:>3}% ", bar, progress_pct))
                     .alignment(Alignment::Right)
-                    .style(Style::default().bg(Color::Blue).fg(Color::White)),
-                status_chunks[2],
+                    .style(Style::default().bg(app.theme_color).fg(Color::Black)),
+                status_chunks[2]
             );
 
             // --- ОГЛАВЛЕНИЕ ---
-            if app.show_toc && !app.toc.is_empty() {
-                let area = centered_rect(30, 75, f.size());
-                f.render_widget(Clear, area);
+if app.show_toc && !app.toc.is_empty() {
+    // Считаем длину самой длинной главы
+    let max_toc_len = app.toc.iter()
+        .map(|(t, _)| t.chars().count())
+        .max()
+        .unwrap_or(20);
 
-                let items: Vec<ListItem> = app
-                    .toc
-                    .iter()
-                    .map(|(title, _)| ListItem::new(title.as_str()))
-                    .collect();
+    // Определяем ширину в символах (минимум 40)
+    let desired_width = (max_toc_len + 8).max(40);
+    
+    // Переводим это в проценты от ширины экрана для функции centered_rect
+    let width_pct = ((desired_width as f32 / f.size().width as f32) * 100.0)
+        .min(80.0) as u16; // Не шире 80% экрана
+
+    // Используем СТАРУЮ функцию centered_rect
+    let area = centered_rect(width_pct, 75, f.size());
+    f.render_widget(Clear, area);
+
+    // Дальше считаем max_w для обрезки
+    let max_w = (area.width as usize).saturating_sub(6);
+
+    let items: Vec<ListItem> = app.toc.iter()
+        .map(|(title, _)| {
+            let clean_title = title.trim();
+            let display = if clean_title.chars().count() > max_w {
+                let truncated: String = clean_title.chars().take(max_w.saturating_sub(3)).collect();
+                format!("{}...", truncated.trim_end())
+            } else {
+                clean_title.to_string()
+            };
+            
+            ListItem::new(format!(" {} ", display))
+        })
+        .collect();
 
                 let mut state = ListState::default();
                 state.select(Some(app.toc_index));
@@ -656,84 +693,88 @@ fn main() -> Result<()> {
 
             // --- ОКНО ПОМОЩИ ---
             if app.show_help {
-                let area = centered_rect(25, 70, f.size());
+                let area = centered_rect(30, 70, f.size());
                 f.render_widget(Clear, area);
 
                 let help_text = vec![
-                    Line::from(vec![Span::styled(
-                        "            УПРАВЛЕНИЕ",
-                        Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(Color::Yellow),
-                    )]),
-                    Line::from("   q       : Выход / Назад"),
-                    Line::from("   o       : Настройки / Пути"),
-                    Line::from("   L       : Моя Библиотека"),
-                    Line::from("   /       : Поиск в тексте"),
-                    Line::from("   n       : След. совпадение"),
-                    Line::from("   i       : Инфо о книге"),
-                    Line::from("   t       : Оглавление"),
-                    Line::from("   ?       : Помощь"),
-                    Line::from(""),
-                    Line::from(vec![Span::styled(
-                        "            ЗАКЛАДКИ",
-                        Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(Color::Yellow),
-                    )]),
-                    Line::from("   m       : Поставить метку"),
-                    Line::from("   M       : Список закладок"),
-                    Line::from("   d/Del   : Удалить (в списке)"),
-                    Line::from(""),
-                    Line::from(vec![Span::styled(
-                        "            НАВИГАЦИЯ",
-                        Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(Color::Yellow),
-                    )]),
-                    Line::from("   JK/Стрелки : Вверх/Вниз"),
-                    Line::from("   Space/Right: Стр. вперед"),
-                    Line::from("   Left       : Стр. назад"),
-                    Line::from("   Home/End   : В начало/конец"),
-                    Line::from("   +/-        : Ширина текста"),
+                    "          УПРАВЛЕНИЕ",
+                    "      q       : Выход / Назад",
+                    "      o       : Настройки / Пути",
+                    "      L       : Моя Библиотека",
+                    "      /       : Поиск в тексте",
+                    "      n / N   : Поиск Вперед / Назад",
+                    "      i       : Инфо о книге",
+                    "      t       : Оглавление",
+                    "      c       : Сменить Тему",
+                    "      ?       : Помощь (скролл j/k)",
+                    "",
+                    "          БИБЛИОТЕКА",
+                    "      s       : Сортировка (Автор/Цикл/Имя)",
+                    "      /       : Поиск в библиотеке",
+                    "      Enter   : Открыть выбранную книгу",
+                    "",
+                    "          ЗАКЛАДКИ",
+                    "      m       : Поставить метку",
+                    "      M       : Список закладок",
+                    "      d / Del : Удалить (в списке)",
+                    "",
+                    "          НАВИГАЦИЯ",
+                    "      j / k   : Вниз / Вверх",
+                    "      Space   : Стр. вперед",
+                    "      +/-     : Ширина текста",
+                    "      Home/End: В начало / конец",
                 ];
-                let help_widget = Paragraph::new(help_text).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Double)
-                        .title(" КЛАВИШИ ")
-                        .title_alignment(Alignment::Center),
-                );
+
+                // Превращаем строки в Line для Paragraph
+                let display_help: Vec<Line> = help_text.iter().map(|&l| {
+                    let style = if l.starts_with(" ") {
+                        Style::default()
+                    } else {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    };
+                    Line::from(vec![Span::raw(" "), Span::styled(l, style)])
+                }).collect();
+
+                let help_widget = Paragraph::new(display_help)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Double)
+                            .title(" КЛАВИШИ УПРАВЛЕНИЯ ")
+                            .title_alignment(Alignment::Center),
+                    )
+                    // СТРОКА ВКЛЮЧАЕТ СКРОЛЛ
+                    .scroll((app.library_index as u16, 0)); 
 
                 f.render_widget(help_widget, area);
             }
 
             // --- ОКНО ПОИСКА ---
-            if app.is_searching {
-                let area = centered_rect(60, 10, f.size());
-                f.render_widget(Clear, area);
+            if app.is_searching && !matches!(app.state, AppState::Scanning) { 
+    // Теперь будет рисоваться ТОЛЬКО если НЕ сканируем
+    let area = centered_rect(60, 10, f.size());
+    f.render_widget(Clear, area); 
 
-                let title_text = if app.search_results.is_empty() {
-                    " ПОИСК [Ничего не найдено] ".to_string()
+                let current_query = if matches!(app.state, AppState::Library) {
+                    &app.search_library_query
                 } else {
-                    format!(
-                        " ПОИСК [{} / {}] ",
-                        app.current_search_idx + 1,
-                        app.search_results.len()
-                    )
+                    &app.search_query
                 };
 
-                let search_block = Paragraph::new(format!(" > {}_", app.search_query)).block(
+                let search_block = Paragraph::new(format!(" > {}_", current_query)).block(
                     Block::default()
-                        .title(title_text)
+                        .title(Span::styled(
+                            " ПОИСК ",
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        ))
+                        .title_alignment(Alignment::Center)
                         .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Yellow))
-                        .border_type(BorderType::Double),
+                        .border_type(BorderType::Double)
+                        .border_style(Style::default().fg(Color::White)), 
                 );
-
                 f.render_widget(search_block, area);
-            } // <--- ВОТ ТУТ закрывается поиск
-
+            }
+                            
             // --- ОКНО СКАНЕР --- (теперь оно само по себе)
             if let AppState::Scanning = app.state {
                 let area = centered_rect(40, 10, f.size());
@@ -778,7 +819,7 @@ fn main() -> Result<()> {
 
                 // Создаем и настраиваем состояние списка
                 let mut state = ListState::default();
-                state.select(Some(app.library_index)); // Используем library_index как курсор
+                state.select(Some(app.library_index));
 
                 let list = List::new(items)
                     .block(
@@ -798,73 +839,97 @@ fn main() -> Result<()> {
 
                 // ВАЖНО: используем stateful виджет
                 f.render_stateful_widget(list, area, &mut state);
-            }
-        })?; // на питоне пробелы, тут скобки ппц
+            } // <--- ЗАКРЫВАЕТ if let AppState::Bookmarks
+        })?; // <--- ЗАКРЫВАЕТ terminal.draw
+
 
         if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
+    // Читаем ПЕРВОЕ событие
+    if let Event::Key(key) = event::read()? {
+        if key.kind == KeyEventKind::Press {
+            match key.code {
                         // --- Библиотека ---
                         _ if matches!(app.state, AppState::Library) => match key.code {
-                            // Выход
-                            KeyCode::Esc | KeyCode::Char('q') => app.state = AppState::Reader,
+    // ВАЖНО: сначала обрабатываем ввод в режиме поиска
+    KeyCode::Char(c) if app.is_searching => {
+        app.search_library_query.push(c);
+        app.library_index = 0;
+    }
+    KeyCode::Backspace if app.is_searching => {
+        app.search_library_query.pop();
+    }
+    KeyCode::Esc if app.is_searching => {
+        app.is_searching = false;
+        app.search_library_query.clear(); // Сброс: возвращаем весь список
+    }
+    KeyCode::Enter if app.is_searching => {
+        app.is_searching = false; // Фиксация: оставляем отфильтрованное
+    }
 
-                            // Удаление
-                            KeyCode::Char('d') | KeyCode::Delete => {
-                                if let Some(path) =
-                                    app.library_results.get(app.library_index).cloned()
-                                {
-                                    app.library.books.remove(&path);
-                                    app.library_results.remove(app.library_index);
-                                    app.library_index = app
-                                        .library_index
-                                        .min(app.library_results.len().saturating_sub(1));
-                                    app.library.save();
+    // Только если НЕ в режиме поиска, работают системные клавиши
+    KeyCode::Char('q') | KeyCode::Esc if !app.is_searching => {
+        app.state = AppState::Reader;
+    }
+    KeyCode::Char('/') if !app.is_searching => {
+        app.is_searching = true;
+        app.search_library_query.clear();
+    }
+
+                                                        // Сортировка
+                            KeyCode::Char('s') => {
+                                let current_path = app.library_results.get(app.library_index).cloned();
+                                match app.sort_mode {
+                                    SortMode::Title => {
+                                        app.library_results.sort_by_key(|p| app.library.books.get(p).map(|b| b.author.to_lowercase()));
+                                        app.sort_mode = SortMode::Author;
+                                    }
+                                    SortMode::Author => {
+                                        app.library_results.sort_by(|a, b| {
+                                            let book_a = app.library.books.get(a);
+                                            let book_b = app.library.books.get(b);
+                                            let s_a = book_a.map(|i| i.series.to_lowercase()).unwrap_or_default();
+                                            let s_b = book_b.map(|i| i.series.to_lowercase()).unwrap_or_default();
+                                            if s_a.is_empty() && !s_b.is_empty() { return std::cmp::Ordering::Greater; }
+                                            if !s_a.is_empty() && s_b.is_empty() { return std::cmp::Ordering::Less; }
+                                            if s_a == s_b {
+                                                let n_a = book_a.map(|i| i.series_num).unwrap_or(0);
+                                                let n_b = book_b.map(|i| i.series_num).unwrap_or(0);
+                                                n_a.cmp(&n_b)
+                                            } else { s_a.cmp(&s_b) }
+                                        });
+                                        app.sort_mode = SortMode::Series;
+                                    }
+                                    SortMode::Series => {
+                                        app.library_results.sort_by_key(|p| app.library.books.get(p).map(|b| b.title.to_lowercase()));
+                                        app.sort_mode = SortMode::Title;
+                                    }
+                                }
+                                if let Some(path) = current_path {
+                                    if let Some(pos) = app.library_results.iter().position(|p| p == &path) {
+                                        app.library_index = pos;
+                                    }
                                 }
                             }
 
-                            // Сортировка
-                            KeyCode::Char('s') => match app.sort_mode {
-                                SortMode::Title => {
-                                    app.library_results.sort_by_key(|p| {
-                                        app.library.books.get(p).map(|b| b.author.to_lowercase())
-                                    });
-                                    app.sort_mode = SortMode::Author;
-                                }
-                                SortMode::Author => {
-                                    app.library_results.sort_by(|a, b| {
-                                        let book_a = app.library.books.get(a);
-                                        let book_b = app.library.books.get(b);
-                                        let s_a = book_a
-                                            .map(|i| i.series.to_lowercase())
-                                            .unwrap_or_default();
-                                        let s_b = book_b
-                                            .map(|i| i.series.to_lowercase())
-                                            .unwrap_or_default();
-                                        if s_a.is_empty() && !s_b.is_empty() {
-                                            return std::cmp::Ordering::Greater;
-                                        }
-                                        if !s_a.is_empty() && s_b.is_empty() {
-                                            return std::cmp::Ordering::Less;
-                                        }
-                                        if s_a == s_b {
-                                            let n_a = book_a.map(|i| i.series_num).unwrap_or(0);
-                                            let n_b = book_b.map(|i| i.series_num).unwrap_or(0);
-                                            n_a.cmp(&n_b)
-                                        } else {
-                                            s_a.cmp(&s_b)
-                                        }
-                                    });
-                                    app.sort_mode = SortMode::Series;
-                                }
-                                SortMode::Series => {
-                                    app.library_results.sort_by_key(|p| {
-                                        app.library.books.get(p).map(|b| b.title.to_lowercase())
-                                    });
-                                    app.sort_mode = SortMode::Title;
-                                }
-                            },
+
+// Нажатие '/' в библиотеке
+KeyCode::Char('/') => {
+    app.is_searching = true; 
+    app.search_library_query.clear(); // Используем отдельное поле
+}
+
+// Ввод символов (когда в библиотеке и is_searching)
+KeyCode::Char(c) if app.is_searching => {
+    app.search_library_query.push(c);
+    app.library_index = 0;
+}
+KeyCode::Backspace if app.is_searching => {
+    app.search_library_query.pop();
+}
+KeyCode::Esc if app.is_searching => {
+    app.is_searching = false;
+    app.search_library_query.clear();
+}
 
                             // Навигация
                             KeyCode::Home => app.library_index = 0,
@@ -890,11 +955,23 @@ fn main() -> Result<()> {
 
                             // Открытие книги
                             KeyCode::Enter => {
-                                if let Some(selected_path) =
-                                    app.library_results.get(app.library_index).cloned()
-                                {
-                                    if let Some(old_book) = app.library.books.get_mut(&app.filename)
-                                    {
+                                let query = app.search_library_query.to_lowercase();
+                                let filtered: Vec<PathBuf> = app.library_results
+                                    .iter()
+                                    .filter(|path| {
+                                        if query.is_empty() { return true; }
+                                        let info = app.library.books.get(*path);
+                                        match app.sort_mode {
+                                            SortMode::Title => info.map(|i| i.title.to_lowercase().contains(&query)).unwrap_or_default(),
+                                            SortMode::Author => info.map(|i| i.author.to_lowercase().contains(&query)).unwrap_or_default(),
+                                            SortMode::Series => info.map(|i| i.series.to_lowercase().contains(&query)).unwrap_or_default(),
+                                        }
+                                    })
+                                    .cloned()
+                                    .collect();
+
+                                if let Some(selected_path) = filtered.get(app.library_index).cloned() {
+                                    if let Some(old_book) = app.library.books.get_mut(&app.filename) {
                                         old_book.last_read_line = app.scroll;
                                     }
                                     let (p, l, t) = load_book_data(&selected_path, app.width_cache);
@@ -902,20 +979,16 @@ fn main() -> Result<()> {
                                     app.parser = p;
                                     app.lines = l;
                                     app.toc = t;
-                                    app.scroll = app
-                                        .library
-                                        .books
-                                        .get(&app.filename)
-                                        .map(|b| b.last_read_line)
-                                        .unwrap_or(0);
+                                    app.scroll = app.library.books.get(&app.filename)
+                                        .map(|b| b.last_read_line).unwrap_or(0);
                                     app.state = AppState::Reader;
                                     app.library.save();
                                 }
-                            }
-                            _ => {}
-                        },
+                            } // Закрыли KeyCode::Enter
+                            _ => {} // Закрыли остальные клавиши в Library
+                        } // Закрыли весь блок Library (AppState::Library)
 
-                        // --- 1. ОКНО НАСТРОЕК (AppState::Config) ---
+                        // --- 1. ОКНО НАСТРОЕК  ---
                         _ if matches!(app.state, AppState::Config) => match key.code {
                             KeyCode::Esc | KeyCode::Char('q') => app.state = AppState::Reader,
                             KeyCode::Up | KeyCode::Char('k') => {
@@ -928,21 +1001,22 @@ fn main() -> Result<()> {
                             }
                             KeyCode::Enter => match app.config_index {
                                 0 => {
-                                    // ПУНКТ 1: Путь
+                                    // Путь
                                     app.state = AppState::InputPath;
                                     app.input_buffer.clear(); // Очищаем БУФЕР, а не поиск
                                 }
                                 1 => {
+                                    app.is_searching = false;
                                     app.state = AppState::Scanning;
                                     terminal.draw(|f| {
-                                        // Чтобы не было черного экрана, рисуем сначала основной блок (рамку)
+                                        // Чтобы не было черного экрана, рисуем сначала основной блок
                                         let block = Block::default()
                                             .borders(Borders::ALL)
                                             .border_type(BorderType::Rounded)
                                             .style(Style::default().fg(Color::Cyan));
                                         f.render_widget(block, f.size());
 
-                                        // Рисуем окно сканирования чуть выше центра
+                                        // Рисуем окно сканирования
                                         let area = centered_rect(40, 15, f.size());
                                         // Смещаем area чуть выше вручную, если centered_rect это позволяет,
                                         // или просто оставляем так, 15% высоты - это и так довольно узко.
@@ -979,32 +1053,28 @@ fn main() -> Result<()> {
                             _ => {}
                         },
 
-                        // --- ВВОД ПУТИ (AppState::InputPath) ---
+                        // --- ВВОД ПУТИ  ---
                         _ if matches!(app.state, AppState::InputPath) => match key.code {
                             KeyCode::Enter => {
                                 let mut trimmed_path = app.input_buffer.trim().to_string();
 
-                                // Расширяем тильду ~/
                                 if trimmed_path.starts_with('~') {
                                     if let Some(home) = dirs::home_dir() {
-                                        trimmed_path =
-                                            trimmed_path.replacen('~', &home.to_string_lossy(), 1);
+                                        trimmed_path = trimmed_path.replacen('~', &home.to_string_lossy(), 1);
                                     }
                                 }
 
                                 if !trimmed_path.is_empty() {
-                                    let new_path = PathBuf::from(&trimmed_path);
+                                    let new_path = std::path::PathBuf::from(&trimmed_path);
                                     if new_path.exists() && new_path.is_dir() {
-                                        // ПУТЬ ВЕРНЫЙ: сохраняем в настройки библиотеки
                                         app.library.scan_paths = vec![new_path];
                                         app.state = AppState::Config;
                                         app.input_buffer.clear();
                                     } else {
                                         app.input_buffer = "ОШИБКА: Путь не найден!".to_string();
                                     }
-                                } // я всегда буду выравнивать текст, чтобы не ебаться со скобками
+                                }
                             }
-                            // ВЫХОД БЕЗ СОХРАНЕНИЯ: просто возвращаемся в Config, очищая временный ввод
                             KeyCode::Esc | KeyCode::Char('q') => {
                                 app.state = AppState::Config;
                                 app.input_buffer.clear();
@@ -1021,7 +1091,7 @@ fn main() -> Result<()> {
                             _ => {}
                         },
 
-                        // --- 3. РЕЖИМ ПОИСКА (is_searching) ---
+                        // --- 3. РЕЖИМ ПОИСКА  ---
                         _ if app.is_searching => match key.code {
                             KeyCode::Enter => app.is_searching = false,
                             KeyCode::Esc | KeyCode::Char('q') => {
@@ -1049,7 +1119,7 @@ fn main() -> Result<()> {
                             _ => {}
                         },
 
-                        // --- 3. УПРАВЛЕНИЕ ОГЛАВЛЕНИЕМ ---
+                        // ---  УПРАВЛЕНИЕ ОГЛАВЛЕНИЕМ ---
                         KeyCode::Char('q') if app.show_toc => app.show_toc = false,
                         KeyCode::Enter if app.show_toc => {
                             if let Some((_, line_idx)) = app.toc.get(app.toc_index) {
@@ -1094,7 +1164,7 @@ fn main() -> Result<()> {
                             app.search_results.clear();
                         }
 
-                        // 4.3. Выход из программы (только из режима чтения и если нет открытых окон)
+                        // Выход из программы (только из режима чтения и если нет открытых окон)
                         KeyCode::Char('q')
                             if matches!(app.state, AppState::Reader)
                                 && !app.show_help
@@ -1180,15 +1250,28 @@ fn main() -> Result<()> {
                             app.state = AppState::Config;
                             app.config_index = 0;
                         }
-                        KeyCode::Char('/') => {
-                            app.is_searching = true;
-                            app.search_query.clear();
-                        }
-                        KeyCode::Char('?') => {
-                            app.show_help = !app.show_help;
-                            app.show_info = false;
-                            app.show_toc = false;
-                        }
+KeyCode::Char('/') if matches!(app.state, AppState::Reader) => {
+    app.is_searching = true;
+    app.search_query.clear();
+}
+KeyCode::Char('?') => {
+    app.show_help = !app.show_help;
+    app.library_index = 0; // Сбрасываем прокрутку в начало при открытии
+    app.show_info = false;
+    app.show_toc = false;
+}
+
+// Добавь условия для прокрутки помощи
+KeyCode::Down | KeyCode::Char('j') if app.show_help => {
+    // 25 - это общее количество строк. Ограничиваем, чтобы не скроллить в пустоту
+    if app.library_index < 15 { 
+        app.library_index += 1;
+    }
+}
+// Скролл помощи вверх
+KeyCode::Up | KeyCode::Char('k') if app.show_help => {
+    app.library_index = app.library_index.saturating_sub(1);
+}
                         KeyCode::Char('i') => {
                             app.show_info = !app.show_info;
                             app.show_toc = false;
@@ -1203,6 +1286,16 @@ fn main() -> Result<()> {
                                 (app.current_search_idx + 1) % app.search_results.len();
                             app.scroll = app.search_results[app.current_search_idx];
                         }
+
+// Поиск НАЗАД
+KeyCode::Char('N') if !app.search_results.is_empty() => {
+    if app.current_search_idx == 0 {
+        app.current_search_idx = app.search_results.len() - 1;
+    } else {
+        app.current_search_idx -= 1;
+    }
+    app.scroll = app.search_results[app.current_search_idx];
+}
 
                         // НАВИГАЦИЯ (Чтение)
                         KeyCode::Down | KeyCode::Char('j')
@@ -1239,6 +1332,16 @@ fn main() -> Result<()> {
                             let v_height = terminal.size()?.height.saturating_sub(3) as usize;
                             app.scroll = app.lines.len().saturating_sub(v_height);
                         }
+KeyCode::Char('c') => {
+    app.theme_color = match app.theme_color {
+        Color::Cyan => Color::Green,
+        Color::Green => Color::Magenta,
+        Color::Magenta => Color::Yellow,
+        Color::Yellow => Color::Red,
+        Color::Red => Color::White,
+        _ => Color::Cyan,
+    };
+}
                         // Закладки
                         KeyCode::Char('m') => {
                             if let Some(book) = app.library.books.get_mut(&app.filename) {
@@ -1250,7 +1353,7 @@ fn main() -> Result<()> {
                             }
                         }
 
-                        // M (большая) — открыть список закладок этой книги
+                        // открыть список закладок этой книги
                         KeyCode::Char('M') => {
                             app.state = AppState::Bookmarks;
                         }
@@ -1265,17 +1368,18 @@ fn main() -> Result<()> {
                             app.width_cache = 0;
                         }
                         _ => {}
-                    } // 
-                } // Конец KeyEventKind::Press
-            } // Конец if let Event::Key
-        } // устал её искать
-    } // Конец while !app.should_quit
+                    } // 1. закрыл match key.code
+                } // 2. закрыл KeyEventKind
+            } // 3. закрыл Event::Key. Кто эту поеботу придумал?
+        } // 4. закрыл if event::poll
+    } // 5. закрыл while !app.should_quit (ВОТ ТУТ ОН ДОЛЖЕН ЗАКАНЧИВАТЬСЯ) заебали, я её час искал
 
+    // ТЕПЕРЬ ЭТИ КОМАНДЫ БУДУТ ВНУТРИ main:
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())
-}
+} // И только тут конец fn main
 
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (вне main)
 
