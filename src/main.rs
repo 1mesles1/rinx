@@ -155,6 +155,7 @@ struct App {
     theme_color: ratatui::style::Color,
     search_library_query: String,
     library_state: ListState,
+    library_filtered: Vec<PathBuf>,
 }
 
 // Константы для ширины
@@ -236,6 +237,7 @@ fn main() -> Result<()> {
         theme_color: ratatui::style::Color::Cyan,
         search_library_query: String::new(),
         library_state: ListState::default(),
+        library_filtered: Vec::new(),
     };
 
     // ПЕРВЫЙ LAYOUT
@@ -396,6 +398,30 @@ fn main() -> Result<()> {
                     SortMode::Series => "Циклу",
                 };
 
+                // 1. Сначала фильтруем список путей и сохраняем в отдельную переменную
+                let query = app.search_library_query.to_lowercase();
+                let filtered_paths: Vec<std::path::PathBuf> = app.library_results
+                    .iter()
+                    .filter(|path| {
+                        if query.is_empty() { return true; }
+                        let info = app.library.books.get(*path);
+                        match app.sort_mode {
+                            SortMode::Title => info.map(|i| i.title.to_lowercase().contains(&query)).unwrap_or_default(),
+                            SortMode::Author => info.map(|i| i.author.to_lowercase().contains(&query)).unwrap_or_default(),
+                            SortMode::Series => info.map(|i| i.series.to_lowercase().contains(&query)).unwrap_or_default(),
+                        }
+                    })
+                    .cloned()
+                    .collect();
+
+                // 2. ВАЖНО: Корректируем индекс прямо здесь! 
+                // Если после фильтра/сортировки индекс стал больше списка — сбрасываем его на последний доступный.
+                if filtered_paths.is_empty() {
+                    app.library_index = 0;
+                } else if app.library_index >= filtered_paths.len() {
+                    app.library_index = filtered_paths.len().saturating_sub(1);
+                }
+
                 let title_text = if app.is_searching {
                     format!(" ПОИСК ({}): {}_ ", sort_label, app.search_library_query)
                 } else if !app.search_library_query.is_empty() {
@@ -404,32 +430,9 @@ fn main() -> Result<()> {
                     format!(" МОЯ БИБЛИОТЕКА [Сортировка по: {}] ", sort_label)
                 };
 
-                let selected_path = app.library_results
-                    .get(app.library_index)
-                    .map(|p| {
-                        let mut p_str = p.to_string_lossy().to_string();
-                        if let Some(home) = dirs::home_dir() {
-                            let home_s = home.to_string_lossy().to_string();
-                            if p_str.starts_with(&home_s) {
-                                p_str = p_str.replacen(&home_s, "~", 1);
-                            }
-                        }
-                        p_str
-                    })
-                    .unwrap_or_else(|| "...".into());
-
-                let items: Vec<ListItem> = app.library_results
+                // 3. Теперь создаем ListItem из УЖЕ ОТФИЛЬТРОВАННОГО списка
+                let items: Vec<ListItem> = filtered_paths
                     .iter()
-                    .filter(|path| {
-                        if app.search_library_query.is_empty() { return true; }
-                        let info = app.library.books.get(*path);
-                        let q = app.search_library_query.to_lowercase();
-                        match app.sort_mode {
-                            SortMode::Title => info.map(|i| i.title.to_lowercase().contains(&q)).unwrap_or_default(),
-                            SortMode::Author => info.map(|i| i.author.to_lowercase().contains(&q)).unwrap_or_default(),
-                            SortMode::Series => info.map(|i| i.series.to_lowercase().contains(&q)).unwrap_or_default(),
-                        }
-                    })
                     .map(|path| {
                         let info = app.library.books.get(path);
                         let title = info.map(|i| i.title.as_str()).unwrap_or("Без названия");
@@ -448,6 +451,11 @@ fn main() -> Result<()> {
                         ListItem::new(display_string)
                     })
                     .collect();
+
+                // 4. Путь внизу окна берем тоже из filtered_paths
+                let selected_path = filtered_paths.get(app.library_index)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "...".into());
 
                 app.library_state.select(Some(app.library_index));
 
@@ -867,9 +875,10 @@ if app.show_toc && !app.toc.is_empty() {
     }
 
     // Только если НЕ в режиме поиска, работают системные клавиши
-    KeyCode::Char('q') | KeyCode::Esc if !app.is_searching => {
-        app.state = AppState::Reader;
-    }
+KeyCode::Char('q') | KeyCode::Esc if !app.is_searching => {
+    app.search_library_query.clear(); // <--- ДОБАВЬ ЭТО, чтобы при следующем входе было пусто
+    app.state = AppState::Reader;
+}
     KeyCode::Char('/') if !app.is_searching => {
         app.is_searching = true;
         app.search_library_query.clear();
