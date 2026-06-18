@@ -8,6 +8,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use zip::ZipArchive;
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct BookMeta {
     pub title: String,
@@ -18,6 +19,7 @@ pub struct BookMeta {
     pub sequence_number: i32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Paragraph {
     Title(String),

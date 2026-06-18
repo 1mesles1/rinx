@@ -5,7 +5,7 @@ use anyhow::Result;
 use crossterm::execute;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -127,6 +127,7 @@ enum AppState {
     Bookmarks,
 }
 
+#[allow(dead_code)]
 struct App {
     state: AppState, // Текущий режим
     library: Library,
@@ -159,13 +160,16 @@ struct App {
 }
 
 // Константы для ширины
+#[allow(dead_code)]
 const MIN_WIDTH: u16 = 30;
+#[allow(dead_code)]
 const MAX_WIDTH: u16 = 100;
+#[allow(dead_code)]
 const WIDTH_STEP: u16 = 5;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    
+
     if args.iter().any(|a| a == "-v" || a == "`--version") {
         println!("rink {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
@@ -174,7 +178,7 @@ fn main() -> Result<()> {
         println!("? - помощь\no - настройки");
         return Ok(());
     }
-    let mut library = Library::load();
+    let library = Library::load();
 
     let (filepath, start_state) = if args.len() > 1 {
         (PathBuf::from(&args[1]), AppState::Reader)
@@ -248,7 +252,7 @@ fn main() -> Result<()> {
     app.toc = toc;
 
     // Основной цикл
-   let tick_rate = std::time::Duration::from_millis(30); // ~33 FPS достаточно для читалки
+    let _tick_rate = std::time::Duration::from_millis(30); // ~33 FPS достаточно для читалки
     while !app.should_quit {
         terminal.draw(|f| {
             let chunks = Layout::default()
@@ -296,10 +300,10 @@ fn main() -> Result<()> {
                 )
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .style(Style::default().fg(app.theme_color)); 
+                .style(Style::default().fg(app.theme_color));
 
             // 2. Берем только видимые строки
-            let view_height = chunks[0].height.saturating_sub(2) as usize; 
+            let view_height = chunks[0].height.saturating_sub(2) as usize;
 
             // хз, но тоже для скорости и только видимые строки
             let display_lines: Vec<Line> = app
@@ -311,7 +315,11 @@ fn main() -> Result<()> {
                     let is_header = s.starts_with("^:");
                     let base_text = if is_header { &s[2..] } else { s };
 
-                    if app.search_query.is_empty() || !base_text.to_lowercase().contains(&app.search_query.to_lowercase()) {
+                    if app.search_query.is_empty()
+                        || !base_text
+                            .to_lowercase()
+                            .contains(&app.search_query.to_lowercase())
+                    {
                         let style = if is_header {
                             Style::default().fg(Color::Yellow).bold()
                         } else {
@@ -332,7 +340,10 @@ fn main() -> Result<()> {
                                 spans.push(Span::raw(base_text[last_pos..start].to_string()));
                             }
                             let style = Style::default().bg(Color::Red).fg(Color::White).bold();
-                            spans.push(Span::styled(base_text[start..start + part.len()].to_string(), style));
+                            spans.push(Span::styled(
+                                base_text[start..start + part.len()].to_string(),
+                                style,
+                            ));
                             last_pos = start + part.len();
                         }
                         if last_pos < base_text.len() {
@@ -344,9 +355,7 @@ fn main() -> Result<()> {
                 .collect();
 
             // 3. ВАЖНО: У виджета Paragraph теперь скролл всегда (0, 0)
-            let text_widget = Paragraph::new(display_lines)
-                .block(block)
-                .scroll((0, 0));
+            let text_widget = Paragraph::new(display_lines).block(block).scroll((0, 0));
 
             f.render_widget(text_widget, horizontal_chunks[1]);
 
@@ -400,21 +409,30 @@ fn main() -> Result<()> {
 
                 // 1. Сначала фильтруем список путей и сохраняем в отдельную переменную
                 let query = app.search_library_query.to_lowercase();
-                let filtered_paths: Vec<std::path::PathBuf> = app.library_results
+                let filtered_paths: Vec<std::path::PathBuf> = app
+                    .library_results
                     .iter()
                     .filter(|path| {
-                        if query.is_empty() { return true; }
+                        if query.is_empty() {
+                            return true;
+                        }
                         let info = app.library.books.get(*path);
                         match app.sort_mode {
-                            SortMode::Title => info.map(|i| i.title.to_lowercase().contains(&query)).unwrap_or_default(),
-                            SortMode::Author => info.map(|i| i.author.to_lowercase().contains(&query)).unwrap_or_default(),
-                            SortMode::Series => info.map(|i| i.series.to_lowercase().contains(&query)).unwrap_or_default(),
+                            SortMode::Title => info
+                                .map(|i| i.title.to_lowercase().contains(&query))
+                                .unwrap_or_default(),
+                            SortMode::Author => info
+                                .map(|i| i.author.to_lowercase().contains(&query))
+                                .unwrap_or_default(),
+                            SortMode::Series => info
+                                .map(|i| i.series.to_lowercase().contains(&query))
+                                .unwrap_or_default(),
                         }
                     })
                     .cloned()
                     .collect();
 
-                // 2. ВАЖНО: Корректируем индекс прямо здесь! 
+                // 2. ВАЖНО: Корректируем индекс прямо здесь!
                 // Если после фильтра/сортировки индекс стал больше списка — сбрасываем его на последний доступный.
                 if filtered_paths.is_empty() {
                     app.library_index = 0;
@@ -425,7 +443,10 @@ fn main() -> Result<()> {
                 let title_text = if app.is_searching {
                     format!(" ПОИСК ({}): {}_ ", sort_label, app.search_library_query)
                 } else if !app.search_library_query.is_empty() {
-                    format!(" РЕЗУЛЬТАТЫ ({}): {} [Esc - сброс] ", sort_label, app.search_library_query)
+                    format!(
+                        " РЕЗУЛЬТАТЫ ({}): {} [Esc - сброс] ",
+                        sort_label, app.search_library_query
+                    )
                 } else {
                     format!(" МОЯ БИБЛИОТЕКА [Сортировка по: {}] ", sort_label)
                 };
@@ -443,8 +464,11 @@ fn main() -> Result<()> {
                         let display_string = match app.sort_mode {
                             SortMode::Author => format!(" {} — {}", author, title),
                             SortMode::Series => {
-                                if series.is_empty() { format!(" {}", title) } 
-                                else { format!(" ({}, #{}) {}", series, s_num, title) }
+                                if series.is_empty() {
+                                    format!(" {}", title)
+                                } else {
+                                    format!(" ({}, #{}) {}", series, s_num, title)
+                                }
                             }
                             SortMode::Title => format!(" {} — {}", title, author),
                         };
@@ -453,7 +477,8 @@ fn main() -> Result<()> {
                     .collect();
 
                 // 4. Путь внизу окна берем тоже из filtered_paths
-                let selected_path = filtered_paths.get(app.library_index)
+                let selected_path = filtered_paths
+                    .get(app.library_index)
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| "...".into());
 
@@ -474,7 +499,7 @@ fn main() -> Result<()> {
                     )
                     .highlight_style(Style::default().bg(Color::Green).fg(Color::Black))
                     .highlight_symbol(">> ")
-                    .scroll_padding(10); 
+                    .scroll_padding(10);
 
                 f.render_stateful_widget(list, area, &mut app.library_state);
             } // <--- ЗДЕСЬ БЛОК БИБЛИОТЕКИ ЗАКРЫВАЕТСЯ
@@ -549,7 +574,7 @@ fn main() -> Result<()> {
             f.render_widget(
                 Paragraph::new(format!(" |==| W:{:<3}{}", app.width, m_tag))
                     .style(Style::default().bg(app.theme_color).fg(Color::Black)),
-                status_chunks[0] // Убрал лишние скобки отсюда
+                status_chunks[0], // Убрал лишние скобки отсюда
             );
 
             // ЦЕНТРАЛЬНАЯ ЧАСТЬ
@@ -557,7 +582,7 @@ fn main() -> Result<()> {
                 Paragraph::new(format!("{} [{}]", app.parser.meta.title, encoding))
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(app.theme_color).fg(Color::Black)),
-                status_chunks[1]
+                status_chunks[1],
             );
 
             // ПРАВАЯ ЧАСТЬ
@@ -565,44 +590,49 @@ fn main() -> Result<()> {
                 Paragraph::new(format!("{} {:>3}% ", bar, progress_pct))
                     .alignment(Alignment::Right)
                     .style(Style::default().bg(app.theme_color).fg(Color::Black)),
-                status_chunks[2]
+                status_chunks[2],
             );
 
             // --- ОГЛАВЛЕНИЕ ---
-if app.show_toc && !app.toc.is_empty() {
-    // Считаем длину самой длинной главы
-    let max_toc_len = app.toc.iter()
-        .map(|(t, _)| t.chars().count())
-        .max()
-        .unwrap_or(20);
+            if app.show_toc && !app.toc.is_empty() {
+                // Считаем длину самой длинной главы
+                let max_toc_len = app
+                    .toc
+                    .iter()
+                    .map(|(t, _)| t.chars().count())
+                    .max()
+                    .unwrap_or(20);
 
-    // Определяем ширину в символах (минимум 40)
-    let desired_width = (max_toc_len + 8).max(40);
-    
-    // Переводим это в проценты от ширины экрана для функции centered_rect
-    let width_pct = ((desired_width as f32 / f.size().width as f32) * 100.0)
-        .min(80.0) as u16; // Не шире 80% экрана
+                // Определяем ширину в символах (минимум 40)
+                let desired_width = (max_toc_len + 8).max(40);
 
-    // Используем СТАРУЮ функцию centered_rect
-    let area = centered_rect(width_pct, 75, f.size());
-    f.render_widget(Clear, area);
+                // Переводим это в проценты от ширины экрана для функции centered_rect
+                let width_pct =
+                    ((desired_width as f32 / f.size().width as f32) * 100.0).min(80.0) as u16; // Не шире 80% экрана
 
-    // Дальше считаем max_w для обрезки
-    let max_w = (area.width as usize).saturating_sub(6);
+                // Используем СТАРУЮ функцию centered_rect
+                let area = centered_rect(width_pct, 75, f.size());
+                f.render_widget(Clear, area);
 
-    let items: Vec<ListItem> = app.toc.iter()
-        .map(|(title, _)| {
-            let clean_title = title.trim();
-            let display = if clean_title.chars().count() > max_w {
-                let truncated: String = clean_title.chars().take(max_w.saturating_sub(3)).collect();
-                format!("{}...", truncated.trim_end())
-            } else {
-                clean_title.to_string()
-            };
-            
-            ListItem::new(format!(" {} ", display))
-        })
-        .collect();
+                // Дальше считаем max_w для обрезки
+                let max_w = (area.width as usize).saturating_sub(6);
+
+                let items: Vec<ListItem> = app
+                    .toc
+                    .iter()
+                    .map(|(title, _)| {
+                        let clean_title = title.trim();
+                        let display = if clean_title.chars().count() > max_w {
+                            let truncated: String =
+                                clean_title.chars().take(max_w.saturating_sub(3)).collect();
+                            format!("{}...", truncated.trim_end())
+                        } else {
+                            clean_title.to_string()
+                        };
+
+                        ListItem::new(format!(" {} ", display))
+                    })
+                    .collect();
 
                 let mut state = ListState::default();
                 state.select(Some(app.toc_index));
@@ -734,14 +764,19 @@ if app.show_toc && !app.toc.is_empty() {
                 ];
 
                 // Превращаем строки в Line для Paragraph
-                let display_help: Vec<Line> = help_text.iter().map(|&l| {
-                    let style = if l.starts_with(" ") {
-                        Style::default()
-                    } else {
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                    };
-                    Line::from(vec![Span::raw(" "), Span::styled(l, style)])
-                }).collect();
+                let display_help: Vec<Line> = help_text
+                    .iter()
+                    .map(|&l| {
+                        let style = if l.starts_with(" ") {
+                            Style::default()
+                        } else {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        };
+                        Line::from(vec![Span::raw(" "), Span::styled(l, style)])
+                    })
+                    .collect();
 
                 let help_widget = Paragraph::new(display_help)
                     .block(
@@ -752,16 +787,16 @@ if app.show_toc && !app.toc.is_empty() {
                             .title_alignment(Alignment::Center),
                     )
                     // СТРОКА ВКЛЮЧАЕТ СКРОЛЛ
-                    .scroll((app.library_index as u16, 0)); 
+                    .scroll((app.library_index as u16, 0));
 
                 f.render_widget(help_widget, area);
             }
 
             // --- ОКНО ПОИСКА ---
-            if app.is_searching && !matches!(app.state, AppState::Scanning) { 
-    // Теперь будет рисоваться ТОЛЬКО если НЕ сканируем
-    let area = centered_rect(60, 10, f.size());
-    f.render_widget(Clear, area); 
+            if app.is_searching && !matches!(app.state, AppState::Scanning) {
+                // Теперь будет рисоваться ТОЛЬКО если НЕ сканируем
+                let area = centered_rect(60, 10, f.size());
+                f.render_widget(Clear, area);
 
                 let current_query = if matches!(app.state, AppState::Library) {
                     &app.search_library_query
@@ -773,17 +808,19 @@ if app.show_toc && !app.toc.is_empty() {
                     Block::default()
                         .title(Span::styled(
                             " ПОИСК ",
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
                         ))
                         .title_alignment(Alignment::Center)
                         .borders(Borders::ALL)
                         .border_type(BorderType::Double)
-                        .border_style(Style::default().fg(Color::White)), 
+                        .border_style(Style::default().fg(Color::White)),
                 );
                 f.render_widget(search_block, area);
             }
-                            
-            // --- ОКНО СКАНЕР --- (теперь оно само по себе)
+
+            // --- ОКНО СКАНЕР --- (теперь оно само по себе). Жаль не умею параллелить.
             if let AppState::Scanning = app.state {
                 let area = centered_rect(40, 10, f.size());
                 f.render_widget(Clear, area);
@@ -850,95 +887,113 @@ if app.show_toc && !app.toc.is_empty() {
             } // <--- ЗАКРЫВАЕТ if let AppState::Bookmarks
         })?; // <--- ЗАКРЫВАЕТ terminal.draw
 
-
         if event::poll(Duration::from_millis(50))? {
-    // Читаем ПЕРВОЕ событие
-    if let Event::Key(key) = event::read()? {
-        if key.kind == KeyEventKind::Press {
-            match key.code {
+            // Читаем ПЕРВОЕ событие
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
                         // --- Библиотека ---
                         _ if matches!(app.state, AppState::Library) => match key.code {
-    // ВАЖНО: сначала обрабатываем ввод в режиме поиска
-    KeyCode::Char(c) if app.is_searching => {
-        app.search_library_query.push(c);
-        app.library_index = 0;
-    }
-    KeyCode::Backspace if app.is_searching => {
-        app.search_library_query.pop();
-    }
-    KeyCode::Esc if app.is_searching => {
-        app.is_searching = false;
-        app.search_library_query.clear(); // Сброс: возвращаем весь список
-    }
-    KeyCode::Enter if app.is_searching => {
-        app.is_searching = false; // Фиксация: оставляем отфильтрованное
-    }
+                            // ВАЖНО: сначала обрабатываем ввод в режиме поиска
+                            KeyCode::Char(c) if app.is_searching => {
+                                app.search_library_query.push(c);
+                                app.library_index = 0;
+                            }
+                            KeyCode::Backspace if app.is_searching => {
+                                app.search_library_query.pop();
+                            }
+                            KeyCode::Esc if app.is_searching => {
+                                app.is_searching = false;
+                                app.search_library_query.clear(); // Сброс: возвращаем весь список
+                            }
+                            KeyCode::Enter if app.is_searching => {
+                                app.is_searching = false; // Фиксация: оставляем отфильтрованное
+                            }
 
-    // Только если НЕ в режиме поиска, работают системные клавиши
-KeyCode::Char('q') | KeyCode::Esc if !app.is_searching => {
-    app.search_library_query.clear(); // <--- ДОБАВЬ ЭТО, чтобы при следующем входе было пусто
-    app.state = AppState::Reader;
-}
-    KeyCode::Char('/') if !app.is_searching => {
-        app.is_searching = true;
-        app.search_library_query.clear();
-    }
+                            // Только если НЕ в режиме поиска, работают системные клавиши
+                            KeyCode::Char('q') | KeyCode::Esc if !app.is_searching => {
+                                app.search_library_query.clear(); // <--- ДОБАВЬ ЭТО, чтобы при следующем входе было пусто
+                                app.state = AppState::Reader;
+                            }
+                            KeyCode::Char('/') if !app.is_searching => {
+                                app.is_searching = true;
+                                app.search_library_query.clear();
+                            }
 
-                                                        // Сортировка
+                            // Сортировка
                             KeyCode::Char('s') => {
-                                let current_path = app.library_results.get(app.library_index).cloned();
+                                let current_path =
+                                    app.library_results.get(app.library_index).cloned();
                                 match app.sort_mode {
                                     SortMode::Title => {
-                                        app.library_results.sort_by_key(|p| app.library.books.get(p).map(|b| b.author.to_lowercase()));
+                                        app.library_results.sort_by_key(|p| {
+                                            app.library
+                                                .books
+                                                .get(p)
+                                                .map(|b| b.author.to_lowercase())
+                                        });
                                         app.sort_mode = SortMode::Author;
                                     }
                                     SortMode::Author => {
                                         app.library_results.sort_by(|a, b| {
                                             let book_a = app.library.books.get(a);
                                             let book_b = app.library.books.get(b);
-                                            let s_a = book_a.map(|i| i.series.to_lowercase()).unwrap_or_default();
-                                            let s_b = book_b.map(|i| i.series.to_lowercase()).unwrap_or_default();
-                                            if s_a.is_empty() && !s_b.is_empty() { return std::cmp::Ordering::Greater; }
-                                            if !s_a.is_empty() && s_b.is_empty() { return std::cmp::Ordering::Less; }
+                                            let s_a = book_a
+                                                .map(|i| i.series.to_lowercase())
+                                                .unwrap_or_default();
+                                            let s_b = book_b
+                                                .map(|i| i.series.to_lowercase())
+                                                .unwrap_or_default();
+                                            if s_a.is_empty() && !s_b.is_empty() {
+                                                return std::cmp::Ordering::Greater;
+                                            }
+                                            if !s_a.is_empty() && s_b.is_empty() {
+                                                return std::cmp::Ordering::Less;
+                                            }
                                             if s_a == s_b {
                                                 let n_a = book_a.map(|i| i.series_num).unwrap_or(0);
                                                 let n_b = book_b.map(|i| i.series_num).unwrap_or(0);
                                                 n_a.cmp(&n_b)
-                                            } else { s_a.cmp(&s_b) }
+                                            } else {
+                                                s_a.cmp(&s_b)
+                                            }
                                         });
                                         app.sort_mode = SortMode::Series;
                                     }
                                     SortMode::Series => {
-                                        app.library_results.sort_by_key(|p| app.library.books.get(p).map(|b| b.title.to_lowercase()));
+                                        app.library_results.sort_by_key(|p| {
+                                            app.library.books.get(p).map(|b| b.title.to_lowercase())
+                                        });
                                         app.sort_mode = SortMode::Title;
                                     }
                                 }
                                 if let Some(path) = current_path {
-                                    if let Some(pos) = app.library_results.iter().position(|p| p == &path) {
+                                    if let Some(pos) =
+                                        app.library_results.iter().position(|p| p == &path)
+                                    {
                                         app.library_index = pos;
                                     }
                                 }
                             }
 
+                            // Нажатие '/' в библиотеке
+                            KeyCode::Char('/') => {
+                                app.is_searching = true;
+                                app.search_library_query.clear(); // Используем отдельное поле
+                            }
 
-// Нажатие '/' в библиотеке
-KeyCode::Char('/') => {
-    app.is_searching = true; 
-    app.search_library_query.clear(); // Используем отдельное поле
-}
-
-// Ввод символов (когда в библиотеке и is_searching)
-KeyCode::Char(c) if app.is_searching => {
-    app.search_library_query.push(c);
-    app.library_index = 0;
-}
-KeyCode::Backspace if app.is_searching => {
-    app.search_library_query.pop();
-}
-KeyCode::Esc if app.is_searching => {
-    app.is_searching = false;
-    app.search_library_query.clear();
-}
+                            // Ввод символов (когда в библиотеке и is_searching)
+                            KeyCode::Char(c) if app.is_searching => {
+                                app.search_library_query.push(c);
+                                app.library_index = 0;
+                            }
+                            KeyCode::Backspace if app.is_searching => {
+                                app.search_library_query.pop();
+                            }
+                            KeyCode::Esc if app.is_searching => {
+                                app.is_searching = false;
+                                app.search_library_query.clear();
+                            }
 
                             // Навигация
                             KeyCode::Home => app.library_index = 0,
@@ -965,22 +1020,34 @@ KeyCode::Esc if app.is_searching => {
                             // Открытие книги
                             KeyCode::Enter => {
                                 let query = app.search_library_query.to_lowercase();
-                                let filtered: Vec<PathBuf> = app.library_results
+                                let filtered: Vec<PathBuf> = app
+                                    .library_results
                                     .iter()
                                     .filter(|path| {
-                                        if query.is_empty() { return true; }
+                                        if query.is_empty() {
+                                            return true;
+                                        }
                                         let info = app.library.books.get(*path);
                                         match app.sort_mode {
-                                            SortMode::Title => info.map(|i| i.title.to_lowercase().contains(&query)).unwrap_or_default(),
-                                            SortMode::Author => info.map(|i| i.author.to_lowercase().contains(&query)).unwrap_or_default(),
-                                            SortMode::Series => info.map(|i| i.series.to_lowercase().contains(&query)).unwrap_or_default(),
+                                            SortMode::Title => info
+                                                .map(|i| i.title.to_lowercase().contains(&query))
+                                                .unwrap_or_default(),
+                                            SortMode::Author => info
+                                                .map(|i| i.author.to_lowercase().contains(&query))
+                                                .unwrap_or_default(),
+                                            SortMode::Series => info
+                                                .map(|i| i.series.to_lowercase().contains(&query))
+                                                .unwrap_or_default(),
                                         }
                                     })
                                     .cloned()
                                     .collect();
 
-                                if let Some(selected_path) = filtered.get(app.library_index).cloned() {
-                                    if let Some(old_book) = app.library.books.get_mut(&app.filename) {
+                                if let Some(selected_path) =
+                                    filtered.get(app.library_index).cloned()
+                                {
+                                    if let Some(old_book) = app.library.books.get_mut(&app.filename)
+                                    {
                                         old_book.last_read_line = app.scroll;
                                     }
                                     let (p, l, t) = load_book_data(&selected_path, app.width_cache);
@@ -988,14 +1055,18 @@ KeyCode::Esc if app.is_searching => {
                                     app.parser = p;
                                     app.lines = l;
                                     app.toc = t;
-                                    app.scroll = app.library.books.get(&app.filename)
-                                        .map(|b| b.last_read_line).unwrap_or(0);
+                                    app.scroll = app
+                                        .library
+                                        .books
+                                        .get(&app.filename)
+                                        .map(|b| b.last_read_line)
+                                        .unwrap_or(0);
                                     app.state = AppState::Reader;
                                     app.library.save();
                                 }
                             } // Закрыли KeyCode::Enter
                             _ => {} // Закрыли остальные клавиши в Library
-                        } // Закрыли весь блок Library (AppState::Library)
+                        }, // Закрыли весь блок Library (AppState::Library)
 
                         // --- 1. ОКНО НАСТРОЕК  ---
                         _ if matches!(app.state, AppState::Config) => match key.code {
@@ -1069,7 +1140,8 @@ KeyCode::Esc if app.is_searching => {
 
                                 if trimmed_path.starts_with('~') {
                                     if let Some(home) = dirs::home_dir() {
-                                        trimmed_path = trimmed_path.replacen('~', &home.to_string_lossy(), 1);
+                                        trimmed_path =
+                                            trimmed_path.replacen('~', &home.to_string_lossy(), 1);
                                     }
                                 }
 
@@ -1259,28 +1331,28 @@ KeyCode::Esc if app.is_searching => {
                             app.state = AppState::Config;
                             app.config_index = 0;
                         }
-KeyCode::Char('/') if matches!(app.state, AppState::Reader) => {
-    app.is_searching = true;
-    app.search_query.clear();
-}
-KeyCode::Char('?') => {
-    app.show_help = !app.show_help;
-    app.library_index = 0; // Сбрасываем прокрутку в начало при открытии
-    app.show_info = false;
-    app.show_toc = false;
-}
+                        KeyCode::Char('/') if matches!(app.state, AppState::Reader) => {
+                            app.is_searching = true;
+                            app.search_query.clear();
+                        }
+                        KeyCode::Char('?') => {
+                            app.show_help = !app.show_help;
+                            app.library_index = 0; // Сбрасываем прокрутку в начало при открытии
+                            app.show_info = false;
+                            app.show_toc = false;
+                        }
 
-// Добавь условия для прокрутки помощи
-KeyCode::Down | KeyCode::Char('j') if app.show_help => {
-    // 25 - это общее количество строк. Ограничиваем, чтобы не скроллить в пустоту
-    if app.library_index < 15 { 
-        app.library_index += 1;
-    }
-}
-// Скролл помощи вверх
-KeyCode::Up | KeyCode::Char('k') if app.show_help => {
-    app.library_index = app.library_index.saturating_sub(1);
-}
+                        // Добавь условия для прокрутки помощи
+                        KeyCode::Down | KeyCode::Char('j') if app.show_help => {
+                            // 25 - это общее количество строк. Ограничиваем, чтобы не скроллить в пустоту
+                            if app.library_index < 15 {
+                                app.library_index += 1;
+                            }
+                        }
+                        // Скролл помощи вверх
+                        KeyCode::Up | KeyCode::Char('k') if app.show_help => {
+                            app.library_index = app.library_index.saturating_sub(1);
+                        }
                         KeyCode::Char('i') => {
                             app.show_info = !app.show_info;
                             app.show_toc = false;
@@ -1296,15 +1368,15 @@ KeyCode::Up | KeyCode::Char('k') if app.show_help => {
                             app.scroll = app.search_results[app.current_search_idx];
                         }
 
-// Поиск НАЗАД
-KeyCode::Char('N') if !app.search_results.is_empty() => {
-    if app.current_search_idx == 0 {
-        app.current_search_idx = app.search_results.len() - 1;
-    } else {
-        app.current_search_idx -= 1;
-    }
-    app.scroll = app.search_results[app.current_search_idx];
-}
+                        // Поиск НАЗАД
+                        KeyCode::Char('N') if !app.search_results.is_empty() => {
+                            if app.current_search_idx == 0 {
+                                app.current_search_idx = app.search_results.len() - 1;
+                            } else {
+                                app.current_search_idx -= 1;
+                            }
+                            app.scroll = app.search_results[app.current_search_idx];
+                        }
 
                         // НАВИГАЦИЯ (Чтение)
                         KeyCode::Down | KeyCode::Char('j')
@@ -1341,16 +1413,16 @@ KeyCode::Char('N') if !app.search_results.is_empty() => {
                             let v_height = terminal.size()?.height.saturating_sub(3) as usize;
                             app.scroll = app.lines.len().saturating_sub(v_height);
                         }
-KeyCode::Char('c') => {
-    app.theme_color = match app.theme_color {
-        Color::Cyan => Color::Green,
-        Color::Green => Color::Magenta,
-        Color::Magenta => Color::Yellow,
-        Color::Yellow => Color::Red,
-        Color::Red => Color::White,
-        _ => Color::Cyan,
-    };
-}
+                        KeyCode::Char('c') => {
+                            app.theme_color = match app.theme_color {
+                                Color::Cyan => Color::Green,
+                                Color::Green => Color::Magenta,
+                                Color::Magenta => Color::Yellow,
+                                Color::Yellow => Color::Red,
+                                Color::Red => Color::White,
+                                _ => Color::Cyan,
+                            };
+                        }
                         // Закладки
                         KeyCode::Char('m') => {
                             if let Some(book) = app.library.books.get_mut(&app.filename) {
