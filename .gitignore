@@ -2,3 +2,4 @@
 Cargo.lock
 **/*.rs.bk
 rink_history.json
+.aider*

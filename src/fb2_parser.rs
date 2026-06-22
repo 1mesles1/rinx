@@ -86,8 +86,54 @@ impl FB2Parser {
         self._extract_all(doc.root(), unknown_author);
         Ok(())
     }
-    fn _extract_all(&mut self, root: Node, _unknown_author: &str) {
-        // Сначала собираем все сноски из body с name="notes"
+    fn _extract_all(&mut self, root: Node, unknown_author: &str) {
+        // --- ПАРСИМ МЕТАДАННЫЕ КНИГИ ---
+        if let Some(ti) = root
+            .descendants()
+            .find(|n| n.tag_name().name() == "title-info")
+        {
+            if let Some(t_el) = ti.children().find(|n| n.tag_name().name() == "book-title") {
+                self.meta.title = self._get_text_with_notes(t_el);
+            }
+            if let Some(auth) = ti.children().find(|n| n.tag_name().name() == "author") {
+                let fn_ = auth
+                    .children()
+                    .find(|n| n.tag_name().name() == "first-name")
+                    .and_then(|n| n.text())
+                    .unwrap_or("");
+                let mn_ = auth
+                    .children()
+                    .find(|n| n.tag_name().name() == "middle-name")
+                    .and_then(|n| n.text())
+                    .unwrap_or("");
+                let ln_ = auth
+                    .children()
+                    .find(|n| n.tag_name().name() == "last-name")
+                    .and_then(|n| n.text())
+                    .unwrap_or("");
+                let full_name = format!("{} {} {}", fn_, mn_, ln_)
+                    .replace("  ", " ")
+                    .trim()
+                    .to_string();
+                self.meta.author = if full_name.is_empty() {
+                    unknown_author.to_string()
+                } else {
+                    full_name
+                };
+            }
+            if let Some(ann) = ti.children().find(|n| n.tag_name().name() == "annotation") {
+                self.meta.annotation = self._get_text_with_notes(ann);
+            }
+            if let Some(seq) = ti.children().find(|n| n.tag_name().name() == "sequence") {
+                self.meta.series = seq.attribute("name").unwrap_or("").to_string();
+                self.meta.sequence_number = seq
+                    .attribute("number")
+                    .and_then(|n| n.parse::<i32>().ok())
+                    .unwrap_or(0);
+            }
+        }
+        
+        // Собираем сноски из body с name="notes"
         for body in root.descendants().filter(|n| n.tag_name().name() == "body") {
             if body.attribute("name") == Some("notes") {
                 for sec in body.children().filter(|n| n.tag_name().name() == "section") {
@@ -99,35 +145,29 @@ impl FB2Parser {
             }
         }
         
-        // Потом обрабатываем основной текст
+        // Обрабатываем основной текст
         for body in root.descendants().filter(|n| n.tag_name().name() == "body") {
             if body.attribute("name") != Some("notes") {
                 self._walk(body, None);
             }
         }
         
-        // ДОБАВЛЯЕМ: Создаем главу "Сноски" в конце оглавления
+        // Создаем главу "Сноски" в конце оглавления
         if !self.notes.is_empty() {
-            // Сначала добавляем заголовок "Сноски" как отдельный параграф
             let footnote_title = "Сноски".to_string();
             self.paragraphs.push(Paragraph::Title(footnote_title.clone()));
             
-            // Собираем все номера сносок из footnotes_locations
-            let mut footnote_numbers: Vec<(String, String)> = Vec::new(); // (номер, id)
+            let mut footnote_numbers: Vec<(String, String)> = Vec::new();
             
-            // Проходим по всем зарегистрированным сноскам в тексте
             for (_, note_id) in &self.footnotes_locations {
                 if let Some(_text) = self.notes.get(note_id) {
-                    // Ищем номер сноски в тексте (формат: ^f:[X])
                     let mut found_num = None;
                     for paragraph in &self.paragraphs {
                         if let Paragraph::Body(body_text) = paragraph {
-                            // Ищем маркер ^f:[X] в тексте
                             if let Some(start) = body_text.find("^f:[") {
                                 if let Some(end) = body_text[start..].find(']') {
                                     let num_str = &body_text[start+4..start+end];
                                     if let Ok(num) = num_str.parse::<usize>() {
-                                        // Проверяем, что это наша сноска
                                         let note_idx = self.footnotes_locations
                                             .iter()
                                             .position(|(_, id)| id == note_id)
@@ -143,7 +183,6 @@ impl FB2Parser {
                         }
                     }
                     
-                    // Если номер найден, используем его, иначе используем порядковый номер
                     let display_num = found_num.map(|n| n.to_string()).unwrap_or_else(|| {
                         (self.footnotes_locations.iter().position(|(_, id)| id == note_id).unwrap_or(0) + 1).to_string()
                     });
@@ -152,21 +191,17 @@ impl FB2Parser {
                 }
             }
             
-            // Сортируем по числовому значению
             footnote_numbers.sort_by(|a, b| {
                 let num_a = a.0.parse::<usize>().unwrap_or(0);
                 let num_b = b.0.parse::<usize>().unwrap_or(0);
                 num_a.cmp(&num_b)
             });
             
-            // Добавляем каждую сноску с правильным номером
             for (num, note_id) in footnote_numbers {
                 if let Some(text) = self.notes.get(&note_id) {
-                    // Убираем левые номера из текста сноски (если они есть в начале)
                     let clean_text = text.trim();
                     let display_text = if let Some(first_char) = clean_text.chars().next() {
                         if first_char.is_ascii_digit() {
-                            // Пропускаем номер в начале текста
                             let mut num_end = 0;
                             for (i, c) in clean_text.chars().enumerate() {
                                 if !c.is_ascii_digit() && c != '.' && c != ')' && c != '(' && c != ' ' {
@@ -191,7 +226,6 @@ impl FB2Parser {
                 }
             }
             
-            // Добавляем запись в оглавление (индекс заголовка "Сноски")
             let toc_index = self.paragraphs.len() - self.notes.len() - 1;
             self.toc.push((footnote_title, toc_index));
         }
@@ -259,7 +293,6 @@ impl FB2Parser {
             let tag = node.tag_name().name();
 
             if tag == "a" {
-                // Ищем href через итератор по атрибутам
                 let mut href = "";
                 for attr in node.attributes() {
                     if attr.name().to_lowercase() == "href" {
@@ -299,7 +332,6 @@ impl FB2Parser {
                     }
                 }
                 
-                // Если это не сноска, добавляем текст ссылки
                 for child in node.children() {
                     self._collect_text(child, text, note_id_inherit);
                 }
