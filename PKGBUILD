@@ -2,21 +2,23 @@
 # Contributor: measles
 
 pkgname=rink
-pkgver=0.3.5
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="A console-based FB2 reader with library management, bookmarks, footnotes and i18n support"
 arch=('x86_64' 'aarch64')
 url="https://github.com/measles/rink"
 license=('GPL3')
-depends=('glibc' 'gcc-libs')
+depends=('glibc' 'gcc-libs' 'zstd')
 makedepends=('cargo' 'rust')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/1mesles1/rink/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
     cd "$srcdir/$pkgname-$pkgver"
-    cargo build --release --locked
+    export ZSTD_SYS_USE_PKG_CONFIG=1
+    cargo build --release
 }
+
 
 package() {
     cd "$srcdir/$pkgname-$pkgver"

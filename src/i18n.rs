@@ -106,10 +106,11 @@ pub const RU_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     "settings_scan" => " 2. Сканировать (Книг: {})",
     "settings_clear" => " 3. Очистить библиотеку",
     "settings_save" => " 4. Сохранить настройки",
-    "settings_back" => " 5. Назад к чтению (Esc)",
-    "settings_lang" => " 6. Язык: {}",
+    "settings_back" => " 7. Назад к чтению (Esc)",
+    "settings_lang" => " 5. Язык: {}",
     "settings_lang_ru" => "Русский",
     "settings_lang_en" => "English",
+    "settings_download" => " 6. Загрузить по ссылке",
 
     // ====== ВВОД ПУТИ ======
     "input_path_title" => " Введите путь для сканирования ",
@@ -205,10 +206,11 @@ pub const EN_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     "settings_scan" => " 2. Scan (Books: {})",
     "settings_clear" => " 3. Clear library",
     "settings_save" => " 4. Save settings",
-    "settings_back" => " 5. Back to reading (Esc)",
-    "settings_lang" => " 6. Language: {}",
+    "settings_back" => " 7. Back to reading (Esc)",
+    "settings_lang" => " 5. Language: {}",
     "settings_lang_ru" => "Русский",
     "settings_lang_en" => "English",
+    "settings_download" => " 6. Download from URL",
 
     // ====== ВВОД ПУТИ ======
     "input_path_title" => " Enter path to scan ",

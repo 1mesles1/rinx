@@ -1,4 +1,4 @@
-# rink (v0.3.5)
+# rink (v0.4.0)
 
 [English](#english) | [Русский](#русский)
 
@@ -26,6 +26,7 @@
 * **Interactive Footnotes**: Press `f` to view footnotes in an adaptive, centered pop-up window with independent scrolling. All footnotes are also listed at the end of the book.
 * **Rich Layout**: Interactive Table of Contents (TOC), multi-encoding support (UTF-8, CP1251), and optimized line rendering (only visible lines are drawn).
 * **Customization**: On-the-fly UI color theme switching (`c`) and text block width adjustments (`+` / `-`).
+* **Download**: Download and open a book directly from the Internet (NEW)
 
 ### Configuration
 Library data and layout settings are stored locally in:
@@ -46,7 +47,7 @@ rink
 ### Installation (Arch Linux)
 ```bash
 git clone https://github.com/1mesles1/rink
-cd fb2less
+cd rink
 makepkg -si
 ```
 
@@ -78,6 +79,7 @@ makepkg -si
 * **Интерактивные сноски**: Просмотр сносок по клавише `f` во всплывающем адаптивном окне по центру экрана со своим скроллингом. Полный список сносок также доступен в конце книги отдельной главой.
 * **Гибкая навигация**: Интерактивное оглавление (TOC), поддержка различных кодировок (UTF-8, CP1251) и оптимизированная отрисовка только видимых строк.
 * **Кастомизация**: Смена цветовых схем интерфейса на лету (`c`) и регулировка ширины текстового блока (`+` / `-`).
+* **Скачивание**: Скачивание и открытие книги напрямую из сети
 
 ### Конфигурация
 База данных библиотеки и настройки конфигурации хранятся в:
@@ -98,7 +100,7 @@ rink
 ### Установка (Arch Linux)
 ```bash
 git clone https://github.com/1mesles1/rink
-cd fb2less
+cd rink
 makepkg -si
 ```
 

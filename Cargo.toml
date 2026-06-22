@@ -1,6 +1,6 @@
 [package]
 name = "rink"
-version = "0.3.5"
+version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
@@ -12,9 +12,12 @@ serde_json = "1.0"
 anyhow = "1.0"
 roxmltree = "0.19"
 dirs = "5.0"
-zip = "0.6"      # Для работы с архивами .zip
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 regex = "1"      # Для работы с регулярными выражениями
 textwrap = { version = "0.16.2", features = ["unicode-width"] }
 encoding_rs = "0.8.35"
 walkdir = "2"
 phf = { version = "0.11", features = ["macros"] }
+reqwest = { version = "0.11", features = ["blocking"] }
+tempfile = "3.8"
+url = "2.4"
