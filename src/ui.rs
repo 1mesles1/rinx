@@ -453,7 +453,7 @@ fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_widget(
 Paragraph::new(
-    format!("  {}", I18n::t(lang, "status_width").replace("{:<3}", &app.width.to_string()) + &m_tag),
+    format!(" {}", I18n::t(lang, "status_width").replace("{:<3}", &app.width.to_string()) + &m_tag),
 )
         .style(Style::default().bg(app.library.theme_color).fg(Color::Black)),
         status_chunks[0],
