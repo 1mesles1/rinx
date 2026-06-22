@@ -97,7 +97,7 @@ pub fn handle_key_event(
             app.config_index = app.config_index.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') if matches!(app.state, AppState::Config) => {
-            if app.config_index < 7 {
+            if app.config_index < 9 {
                 app.config_index += 1;
             }
         }
@@ -355,6 +355,7 @@ pub fn handle_key_event(
                 Color::Red => Color::White,
                 _ => Color::Cyan,
             };
+            // Если рамки были "как тема", обновляем их
             if app.library.popup_border_color != Color::White {
                 app.library.popup_border_color = app.library.theme_color;
             }
@@ -606,7 +607,23 @@ fn handle_settings_enter(
             };
             app.library.save();
         }
-        7 => {
+        7 => { // Рамка книги
+            app.library.main_border = match app.library.main_border {
+                crate::library::BorderStyle::Plain => crate::library::BorderStyle::Double,
+                crate::library::BorderStyle::Double => crate::library::BorderStyle::Rounded,
+                crate::library::BorderStyle::Rounded => crate::library::BorderStyle::Plain,
+            };
+            app.library.save();
+        }
+        8 => { // Рамки окон
+            app.library.popup_border = match app.library.popup_border {
+                crate::library::BorderStyle::Plain => crate::library::BorderStyle::Double,
+                crate::library::BorderStyle::Double => crate::library::BorderStyle::Rounded,
+                crate::library::BorderStyle::Rounded => crate::library::BorderStyle::Plain,
+            };
+            app.library.save();
+        }
+        9 => { // Назад
             app.state = AppState::Reader;
         }
         _ => {}

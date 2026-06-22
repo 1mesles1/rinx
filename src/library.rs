@@ -12,6 +12,19 @@ pub enum SortMode {
     Series,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
+pub enum BorderStyle {
+    Plain,
+    Double,
+    Rounded,
+}
+
+impl Default for BorderStyle {
+    fn default() -> Self {
+        BorderStyle::Rounded
+    }
+}
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct BookEntry {
     pub title: String,
@@ -32,6 +45,8 @@ pub struct Library {
     #[serde(with = "crate::config::popup_border_color_serde")]
     pub popup_border_color: ratatui::style::Color,
     pub language: Language,
+    pub main_border: BorderStyle,
+    pub popup_border: BorderStyle,
 }
 
 impl Library {
@@ -55,6 +70,8 @@ impl Library {
             theme_color: ratatui::style::Color::Cyan,
             popup_border_color: ratatui::style::Color::White,
             language: Language::Ru,
+            main_border: BorderStyle::Rounded,
+            popup_border: BorderStyle::Double,
         }
     }
 

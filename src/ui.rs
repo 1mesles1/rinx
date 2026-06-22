@@ -9,9 +9,19 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragr
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+fn border_style_to_border_type(style: crate::library::BorderStyle) -> BorderType {
+    match style {
+        crate::library::BorderStyle::Plain => BorderType::Plain,
+        crate::library::BorderStyle::Double => BorderType::Double,
+        crate::library::BorderStyle::Rounded => BorderType::Rounded,
+    }
+}
+
 pub fn render(f: &mut Frame, app: &mut App) {
     let lang = app.library.language;
     let popup_border_style = app.get_popup_border_style();
+    let main_border_type = border_style_to_border_type(app.library.main_border);
+    let popup_border_type = border_style_to_border_type(app.library.popup_border);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -57,7 +67,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             .alignment(Alignment::Right),
         )
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(main_border_type)
         .style(Style::default().fg(app.library.theme_color));
 
     let view_height = chunks[0].height.saturating_sub(2) as usize;
@@ -149,62 +159,62 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let text_widget = Paragraph::new(display_lines).block(block).scroll((0, 0));
     f.render_widget(text_widget, horizontal_chunks[1]);
 
-    // --- НАСТРОЙКИ ---
+    // --- НАСТРОЙКИ --- ширина 60%, высота 55%
     if matches!(app.state, AppState::Config) || matches!(app.state, AppState::InputPath) || matches!(app.state, AppState::InputUrl) {
-        render_settings(f, app, popup_border_style);
+        render_settings(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- БИБЛИОТЕКА ---
+    // --- БИБЛИОТЕКА --- ширина 60%, высота 70%
     if let AppState::Library = app.state {
-        render_library(f, app, popup_border_style);
+        render_library(f, app, popup_border_style, popup_border_type);
     }
 
     // --- СТАТУС-БАР ---
     render_status_bar(f, app, chunks[1]);
 
-    // --- ОГЛАВЛЕНИЕ ---
+    // --- ОГЛАВЛЕНИЕ --- ширина динамическая, высота 75%
     if app.show_toc && !app.toc.is_empty() {
-        render_toc(f, app, popup_border_style);
+        render_toc(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ИНФОРМАЦИЯ О КНИГЕ ---
+    // --- ИНФОРМАЦИЯ О КНИГЕ --- ширина 40%, высота 70%
     if app.show_info {
-        render_book_info(f, app, popup_border_style);
+        render_book_info(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ПОМОЩЬ ---
+    // --- ПОМОЩЬ --- ширина 30%, высота 70%
     if app.show_help {
-        render_help(f, app, popup_border_style);
+        render_help(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ПОИСК ---
+    // --- ПОИСК --- ширина 60%, высота 10%
     if app.is_searching && !matches!(app.state, AppState::Scanning) {
-        render_search(f, app, popup_border_style);
+        render_search(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- СКАНИРОВАНИЕ ---
+    // --- СКАНИРОВАНИЕ --- ширина 40%, высота 10%
     if let AppState::Scanning = app.state {
         render_scanning(f, app);
     }
 
-    // --- ЗАКЛАДКИ ---
+    // --- ЗАКЛАДКИ --- ширина 50%, высота 50%
     if let AppState::Bookmarks = app.state {
-        render_bookmarks(f, app, popup_border_style);
+        render_bookmarks(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- СНОСКА ---
+    // --- СНОСКА --- ширина и высота динамические, ограничены 80% и 60%
     if app.show_footnote {
-        render_footnote(f, app, popup_border_style);
+        render_footnote(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ВВОД ПУТИ ---
+    // --- ВВОД ПУТИ --- ширина поля 58%, отступы по 21%
     if let AppState::InputPath = app.state {
-        render_input_path(f, app, popup_border_style);
+        render_input_path(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ВВОД ССЫЛКИ ---
+    // --- ВВОД ССЫЛКИ --- ширина поля 58%, отступы по 21%
     if let AppState::InputUrl = app.state {
-        render_input_url(f, app, popup_border_style);
+        render_input_url(f, app, popup_border_style, popup_border_type);
     }
 }
 
@@ -229,10 +239,10 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 // ---- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТРИСОВКИ ----
 
-fn render_settings(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО НАСТРОЕК — ШИРИНА: 60%  |  ВЫСОТА: 55%
+fn render_settings(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
-    // ОКНО НАСТРОЕК — ШИРИНА: 60%  |  ВЫСОТА: 55%
-    let area = centered_rect(60, 30, f.size());
+    let area = centered_rect(60, 35, f.size());
     f.render_widget(Clear, area);
 
     let lang_label = if lang == crate::i18n::Language::Ru {
@@ -241,10 +251,22 @@ fn render_settings(f: &mut Frame, app: &App, border_style: Style) {
         I18n::t(lang, "settings_lang_en")
     };
 
-    let border_label = if app.library.popup_border_color == Color::White {
+    let border_color_label = if app.library.popup_border_color == Color::White {
         "Белые"
     } else {
         "Как тема"
+    };
+
+    let main_border_label = match app.library.main_border {
+        crate::library::BorderStyle::Plain => "Простые",
+        crate::library::BorderStyle::Double => "Двойные",
+        crate::library::BorderStyle::Rounded => "Скруглённые",
+    };
+
+    let popup_border_label = match app.library.popup_border {
+        crate::library::BorderStyle::Plain => "Простые",
+        crate::library::BorderStyle::Double => "Двойные",
+        crate::library::BorderStyle::Rounded => "Скруглённые",
     };
 
     let menu_items = vec![
@@ -252,9 +274,11 @@ fn render_settings(f: &mut Frame, app: &App, border_style: Style) {
         I18n::t(lang, "settings_scan").replace("{}", &app.library.books.len().to_string()),
         I18n::t(lang, "settings_clear"),
         I18n::t(lang, "settings_save"),
-        " 5. Загрузить по ссылке".to_string(),
+        I18n::t(lang, "settings_download"),
         I18n::t(lang, "settings_lang").replace("{}", &lang_label),
-        format!(" 7. Рамки: {}", border_label),
+        I18n::t(lang, "settings_border_color").replace("{}", border_color_label),
+        I18n::t(lang, "settings_main_border").replace("{}", main_border_label),
+        I18n::t(lang, "settings_popup_border").replace("{}", popup_border_label),
         I18n::t(lang, "settings_back"),
     ];
 
@@ -274,7 +298,7 @@ fn render_settings(f: &mut Frame, app: &App, border_style: Style) {
     let config_list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Double)
+            .border_type(border_type)
             .title(I18n::t(lang, "settings_title"))
             .title_alignment(Alignment::Center)
             .border_style(border_style),
@@ -282,9 +306,9 @@ fn render_settings(f: &mut Frame, app: &App, border_style: Style) {
     f.render_widget(config_list, area);
 }
 
-fn render_library(f: &mut Frame, app: &mut App, border_style: Style) {
+// ОКНО БИБЛИОТЕКИ — ШИРИНА: 60%  |  ВЫСОТА: 70%
+fn render_library(f: &mut Frame, app: &mut App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
-    // ОКНО БИБЛИОТЕКИ — ШИРИНА: 60%  |  ВЫСОТА: 70%
     let area = centered_rect(60, 70, f.size());
     f.render_widget(Clear, area);
 
@@ -373,7 +397,7 @@ fn render_library(f: &mut Frame, app: &mut App, border_style: Style) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Double)
+                .border_type(border_type)
                 .title(title_text)
                 .title_alignment(Alignment::Center)
                 .title(
@@ -389,6 +413,7 @@ fn render_library(f: &mut Frame, app: &mut App, border_style: Style) {
     f.render_stateful_widget(list, area, &mut app.library_state);
 }
 
+// СТАТУС-БАР
 fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let lang = app.library.language;
     let terminal_height = f.size().height as usize;
@@ -449,7 +474,8 @@ fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn render_toc(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО ОГЛАВЛЕНИЯ — ШИРИНА: динамическая (width_pct)  |  ВЫСОТА: 75%
+fn render_toc(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let max_toc_len = app
         .toc
@@ -460,7 +486,6 @@ fn render_toc(f: &mut Frame, app: &App, border_style: Style) {
     let desired_width = (max_toc_len + 8).max(40);
     let width_pct =
         ((desired_width as f32 / f.size().width as f32) * 100.0).min(80.0) as u16;
-    // ОКНО ОГЛАВЛЕНИЯ — ШИРИНА: динамическая (width_pct)  |  ВЫСОТА: 75%
     let area = centered_rect(width_pct, 75, f.size());
     f.render_widget(Clear, area);
 
@@ -487,7 +512,7 @@ fn render_toc(f: &mut Frame, app: &App, border_style: Style) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Double)
+                .border_type(border_type)
                 .title(I18n::t(lang, "toc_title"))
                 .title_alignment(Alignment::Center)
                 .border_style(border_style),
@@ -497,9 +522,9 @@ fn render_toc(f: &mut Frame, app: &App, border_style: Style) {
     f.render_stateful_widget(toc_list, area, &mut state);
 }
 
-fn render_book_info(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО ИНФОРМАЦИИ О КНИГЕ — ШИРИНА: 40%  |  ВЫСОТА: 70%
+fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
-    // ОКНО ИНФОРМАЦИИ О КНИГЕ — ШИРИНА: 40%  |  ВЫСОТА: 70%
     let area = centered_rect(40, 70, f.size());
     f.render_widget(Clear, area);
 
@@ -559,7 +584,7 @@ fn render_book_info(f: &mut Frame, app: &App, border_style: Style) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Double)
+                .border_type(border_type)
                 .title(I18n::t(lang, "book_info_title_text"))
                 .title_alignment(Alignment::Center)
                 .border_style(border_style),
@@ -568,9 +593,9 @@ fn render_book_info(f: &mut Frame, app: &App, border_style: Style) {
     f.render_widget(info_widget, area);
 }
 
-fn render_help(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО ПОМОЩИ — ШИРИНА: 30%  |  ВЫСОТА: 70%
+fn render_help(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
-    // ОКНО ПОМОЩИ — ШИРИНА: 30%  |  ВЫСОТА: 70%
     let area = centered_rect(30, 70, f.size());
     f.render_widget(Clear, area);
 
@@ -619,7 +644,7 @@ fn render_help(f: &mut Frame, app: &App, border_style: Style) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Double)
+                .border_type(border_type)
                 .title(I18n::t(lang, "help_title"))
                 .title_alignment(Alignment::Center)
                 .border_style(border_style),
@@ -628,9 +653,9 @@ fn render_help(f: &mut Frame, app: &App, border_style: Style) {
     f.render_widget(help_widget, area);
 }
 
-fn render_search(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО ПОИСКА — ШИРИНА: 60%  |  ВЫСОТА: 10%
+fn render_search(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
-    // ОКНО ПОИСКА — ШИРИНА: 60%  |  ВЫСОТА: 10%
     let area = centered_rect(60, 10, f.size());
     f.render_widget(Clear, area);
 
@@ -648,15 +673,15 @@ fn render_search(f: &mut Frame, app: &App, border_style: Style) {
             ))
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
-            .border_type(BorderType::Double)
+            .border_type(border_type)
             .border_style(border_style),
     );
     f.render_widget(search_block, area);
 }
 
+// ОКНО СКАНИРОВАНИЯ — ШИРИНА: 40%  |  ВЫСОТА: 10%
 fn render_scanning(f: &mut Frame, app: &App) {
     let lang = app.library.language;
-    // ОКНО СКАНИРОВАНИЯ — ШИРИНА: 40%  |  ВЫСОТА: 10%
     let area = centered_rect(40, 10, f.size());
     f.render_widget(Clear, area);
     let scan_msg = I18n::t(lang, "scanning_msg")
@@ -672,9 +697,9 @@ fn render_scanning(f: &mut Frame, app: &App) {
     );
 }
 
-fn render_bookmarks(f: &mut Frame, app: &mut App, border_style: Style) {
+// ОКНО ЗАКЛАДОК — ШИРИНА: 50%  |  ВЫСОТА: 50%
+fn render_bookmarks(f: &mut Frame, app: &mut App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
-    // ОКНО ЗАКЛАДОК — ШИРИНА: 50%  |  ВЫСОТА: 50%
     let area = centered_rect(50, 50, f.size());
     f.render_widget(Clear, area);
 
@@ -706,7 +731,7 @@ fn render_bookmarks(f: &mut Frame, app: &mut App, border_style: Style) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Double)
+                .border_type(border_type)
                 .title(I18n::t(lang, "bookmarks_title"))
                 .title_alignment(Alignment::Center)
                 .border_style(border_style),
@@ -721,9 +746,9 @@ fn render_bookmarks(f: &mut Frame, app: &mut App, border_style: Style) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_footnote(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО СНОСКИ — МАКСИМАЛЬНАЯ ШИРИНА: 80%  |  МАКСИМАЛЬНАЯ ВЫСОТА: 60%
+fn render_footnote(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
-    // ОКНО СНОСКИ — МАКСИМАЛЬНАЯ ШИРИНА: 80%  |  МАКСИМАЛЬНАЯ ВЫСОТА: 60%
     let max_width_pct = 80;
     let max_height_pct = 60;
 
@@ -748,7 +773,7 @@ fn render_footnote(f: &mut Frame, app: &App, border_style: Style) {
 
     let width_pct = ((estimated_width as f32 / f.size().width as f32) * 100.0)
         .min(max_width_pct as f32)
-        .max(20.0) as u16;
+        .max(30.0) as u16;
 
     let target_w = (estimated_width as usize).saturating_sub(4);
 
@@ -787,7 +812,7 @@ fn render_footnote(f: &mut Frame, app: &App, border_style: Style) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Double)
+                .border_type(border_type)
                 .title(I18n::t(lang, "footnote_title"))
                 .title_alignment(Alignment::Center)
                 .border_style(border_style),
@@ -797,7 +822,8 @@ fn render_footnote(f: &mut Frame, app: &App, border_style: Style) {
     f.render_widget(footnote_widget, area);
 }
 
-fn render_input_path(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО ВВОДА ПУТИ — левый отступ 21% | поле ввода 58% | правый отступ 21%
+fn render_input_path(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -807,7 +833,6 @@ fn render_input_path(f: &mut Frame, app: &App, border_style: Style) {
             Constraint::Percentage(45),
         ])
         .split(f.size());
-    // ОКНО ВВОДА ПУТИ — левый отступ 21% | поле ввода 58% | правый отступ 21%
     let area = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -827,14 +852,16 @@ fn render_input_path(f: &mut Frame, app: &App, border_style: Style) {
     let input_widget = Paragraph::new(prompt).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Double)
+            .border_type(border_type)
             .title(I18n::t(lang, "input_path_title"))
             .border_style(border_style),
     );
     f.render_widget(input_widget, area);
 }
 
-fn render_input_url(f: &mut Frame, app: &App, border_style: Style) {
+// ОКНО ВВОДА ССЫЛКИ — левый отступ 21% | поле ввода 58% | правый отступ 21%
+fn render_input_url(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
+    let lang = app.library.language;
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -843,7 +870,6 @@ fn render_input_url(f: &mut Frame, app: &App, border_style: Style) {
             Constraint::Percentage(45),
         ])
         .split(f.size());
-    // ОКНО ВВОДА ССЫЛКИ — левый отступ 21% | поле ввода 58% | правый отступ 21%
     let area = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -863,8 +889,8 @@ fn render_input_url(f: &mut Frame, app: &App, border_style: Style) {
     let input_widget = Paragraph::new(prompt).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Double)
-            .title(" ВВЕДИТЕ ССЫЛКУ НА FB2/ZIP ")
+            .border_type(border_type)
+            .title(I18n::t(lang, "input_url_title"))
             .border_style(border_style),
     );
     f.render_widget(input_widget, area);
