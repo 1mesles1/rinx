@@ -1,12 +1,10 @@
 // src/app.rs
 use crate::handlers::handle_key_event;
-use crate::layout;
 use crate::library::Library;
 use crate::ui::render;
 use crate::fb2_parser::FB2Parser;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -50,7 +48,10 @@ pub struct App {
     pub show_footnote: bool,
     pub current_footnote_scroll: usize,
     pub current_footnote_text: String,
-    pub p_map: HashMap<usize, usize>,
+    pub current_footnote_list: Vec<usize>,
+    pub footnote_wrapped_lines: Vec<String>,
+    pub footnote_visible_height: usize,
+    pub current_footnote_number: Option<usize>,
 }
 
 impl App {
@@ -61,8 +62,7 @@ impl App {
         filename: PathBuf,
         scroll: usize,
     ) -> Self {
-        let width = 70;
-        let mut app = Self {
+        Self {
             state,
             library,
             parser,
@@ -70,7 +70,7 @@ impl App {
             lines: Vec::new(),
             scroll,
             should_quit: false,
-            width,
+            width: 70,
             width_cache: 0,
             toc_index: 0,
             show_info: false,
@@ -91,29 +91,14 @@ impl App {
             show_footnote: false,
             current_footnote_scroll: 0,
             current_footnote_text: String::new(),
-            p_map: HashMap::new(),
-        };
-
-        let size = ratatui::layout::Rect::new(0, 0, 80, 24);
-        let draw_width = (size.width as u32 * app.width as u32 / 100) as u16;
-        let (lines, toc, p_map) =
-            layout::prepare_layout(&app.parser.paragraphs, draw_width.saturating_sub(4));
-        app.lines = lines;
-        app.toc = toc;
-        app.p_map = p_map;
-
-        app
+            current_footnote_list: Vec::new(),
+            footnote_wrapped_lines: Vec::new(),
+            footnote_visible_height: 0,
+            current_footnote_number: None,
+        }
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Result<()> {
-        let size = terminal.size()?;
-        let draw_width = (size.width as u32 * self.width as u32 / 100) as u16;
-        let (lines, toc, p_map) =
-            layout::prepare_layout(&self.parser.paragraphs, draw_width.saturating_sub(4));
-        self.lines = lines;
-        self.toc = toc;
-        self.p_map = p_map;
-
         while !self.should_quit {
             terminal.draw(|f| {
                 render(f, self);

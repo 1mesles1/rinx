@@ -1,10 +1,4 @@
 // src/main.rs
-use anyhow::Result;
-use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
-
 mod app;
 mod book;
 mod config;
@@ -14,6 +8,12 @@ mod i18n;
 mod layout;
 mod library;
 mod ui;
+
+use anyhow::Result;
+use crossterm::execute;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 
 use app::App;
 use i18n::{I18n, Language};
@@ -34,7 +34,6 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Убираем mut, так как library не изменяется
     let library = Library::load();
 
     let (filepath, start_state) = if args.len() > 1 {
@@ -49,15 +48,11 @@ fn main() -> Result<()> {
         (std::path::PathBuf::new(), app::AppState::Config)
     };
 
-    let lang = library.language;
+    let _lang = library.language;
     let parser = if filepath.exists() && filepath.is_file() {
-        fb2_parser::FB2Parser::new(
-            &filepath,
-            &I18n::t(lang, "unknown_title"),
-            &I18n::t(lang, "unknown_author"),
-        )
+        fb2_parser::FB2Parser::new(&filepath)
     } else {
-        fb2_parser::FB2Parser::new(&std::path::PathBuf::new(), "", "")
+        fb2_parser::FB2Parser::new(&std::path::PathBuf::new())
     };
 
     enable_raw_mode()?;
@@ -74,7 +69,7 @@ fn main() -> Result<()> {
 
     let mut app = App::new(
         start_state,
-        library, // library передаётся по значению, mut не нужен
+        library,
         parser,
         filepath,
         current_scroll,

@@ -138,6 +138,13 @@ pub const RU_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     // ====== ВЕРСИЯ ======
     "version" => "rink {}",
     "help_version" => "? - помощь\no - настройки",
+
+    // ====== НАСТРОЙКИ - ЗНАЧЕНИЯ ======
+    "border_color_white" => "Белые",
+    "border_color_theme" => "Как тема",
+    "border_style_plain" => "Простые",
+    "border_style_double" => "Двойные",
+    "border_style_rounded" => "Скруглённые",
 };
 
 pub const EN_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
@@ -242,4 +249,11 @@ pub const EN_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     // ====== ВЕРСИЯ ======
     "version" => "rink {}",
     "help_version" => "? - help\no - settings",
+
+    // ====== SETTINGS - VALUES ======
+    "border_color_white" => "White",
+    "border_color_theme" => "As theme",
+    "border_style_plain" => "Plain",
+    "border_style_double" => "Double",
+    "border_style_rounded" => "Rounded",
 };

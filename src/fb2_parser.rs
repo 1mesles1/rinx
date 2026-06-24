@@ -1,399 +1,334 @@
-// src/fb2_parser.rs - исправленная версия с поддержкой text-author
-
-use anyhow::Result;
-use roxmltree::{Document, Node};
+use quick_xml::events::Event;
+use quick_xml::Reader;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
-use std::path::PathBuf;
-use zip::ZipArchive;
+use std::path::{Path, PathBuf};
 
 #[allow(dead_code)]
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
+pub enum Paragraph {
+    Title(String),
+    Subtitle(String),
+    Body(String),
+    Poem(String),
+    Epigraph(String),
+    Cite(String),
+    Author(String),
+    EmphasisBlock(String),
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct BookMeta {
     pub title: String,
     pub author: String,
     pub series: String,
-    pub annotation: String,
-    pub publish: String,
     pub sequence_number: i32,
+    pub annotation: String,
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum Paragraph {
-    Title(String),
-    Epigraph(String),
-    Cite(String),
-    Poem(String),
-    Subtitle(String),
-    Author(String),
-    Body(String),
-    EmphasisBlock(String),
+#[derive(Debug, Clone)]
+pub struct FootnoteInfo {
+    pub text: String,
+    pub number: usize,
 }
 
 pub struct FB2Parser {
+    pub path: PathBuf,
     pub paragraphs: Vec<Paragraph>,
-    pub notes: HashMap<String, String>,
-    pub toc: Vec<(String, usize)>,
     pub meta: BookMeta,
     pub encoding: String,
-    pub footnotes_locations: Vec<(usize, String)>,
+    pub footnotes: Vec<FootnoteInfo>,
+    pub toc: Vec<(String, usize)>,
 }
 
 impl FB2Parser {
-    pub fn new(filename: &PathBuf, unknown_title: &str, unknown_author: &str) -> Self {
+    pub fn new(path: &Path) -> Self {
         let mut parser = Self {
+            path: path.to_path_buf(),
             paragraphs: Vec::new(),
-            notes: HashMap::new(),
+            meta: BookMeta::default(),
+            encoding: "utf-8".to_string(),
+            footnotes: Vec::new(),
             toc: Vec::new(),
-            encoding: "UTF-8".to_string(),
-            footnotes_locations: Vec::new(),
-            meta: BookMeta {
-                title: unknown_title.to_string(),
-                author: unknown_author.to_string(),
-                ..Default::default()
-            },
         };
-        let _ = parser._load_and_parse(filename, unknown_author);
+        if let Err(e) = parser.execute_parse() {
+            eprintln!("Ошибка автоматического парсинга файла {:?}: {}", path, e);
+        }
         parser
     }
 
-    fn _load_and_parse(&mut self, filename: &PathBuf, unknown_author: &str) -> Result<()> {
-        let mut raw_data = Vec::new();
-        if filename.to_string_lossy().to_lowercase().ends_with(".zip") {
-            let file = File::open(filename)?;
-            let mut archive = ZipArchive::new(file)?;
-            let fb2_name = archive
-                .file_names()
-                .find(|n| n.to_lowercase().ends_with(".fb2"))
-                .map(|n| n.to_string());
-            if let Some(name) = fb2_name {
-                let mut zip_file = archive.by_name(&name)?;
-                zip_file.read_to_end(&mut raw_data)?;
-            }
-        } else if !filename.as_os_str().is_empty() && filename.exists() {
-            let mut file = File::open(filename)?;
-            file.read_to_end(&mut raw_data)?;
-        }
-        if raw_data.is_empty() {
-            return Ok(());
-        }
-        let (res, _encoding_used, has_errors) = encoding_rs::UTF_8.decode(&raw_data);
-        let text_data = if has_errors {
-            let (res_1251, _, _) = encoding_rs::WINDOWS_1251.decode(&raw_data);
-            self.encoding = "CP1251".to_string();
-            res_1251.into_owned()
-        } else {
-            self.encoding = "UTF-8".to_string();
-            res.into_owned()
-        };
-        let doc = Document::parse(&text_data)?;
-        self._extract_all(doc.root(), unknown_author);
-        Ok(())
-    }
+    fn execute_parse(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut file = File::open(&self.path)?;
+        let is_zip = self.path.extension().map_or(false, |ext| ext.to_string_lossy().to_lowercase() == "zip");
 
-    fn _extract_all(&mut self, root: Node, unknown_author: &str) {
-        // --- ПАРСИМ МЕТАДАННЫЕ КНИГИ ---
-        if let Some(ti) = root
-            .descendants()
-            .find(|n| n.tag_name().name() == "title-info")
-        {
-            if let Some(t_el) = ti.children().find(|n| n.tag_name().name() == "book-title") {
-                self.meta.title = self._get_text_with_notes(t_el);
-            }
-            if let Some(auth) = ti.children().find(|n| n.tag_name().name() == "author") {
-                let fn_ = auth
-                    .children()
-                    .find(|n| n.tag_name().name() == "first-name")
-                    .and_then(|n| n.text())
-                    .unwrap_or("");
-                let mn_ = auth
-                    .children()
-                    .find(|n| n.tag_name().name() == "middle-name")
-                    .and_then(|n| n.text())
-                    .unwrap_or("");
-                let ln_ = auth
-                    .children()
-                    .find(|n| n.tag_name().name() == "last-name")
-                    .and_then(|n| n.text())
-                    .unwrap_or("");
-                let full_name = format!("{} {} {}", fn_, mn_, ln_)
-                    .replace("  ", " ")
-                    .trim()
-                    .to_string();
-                self.meta.author = if full_name.is_empty() {
-                    unknown_author.to_string()
-                } else {
-                    full_name
-                };
-            }
-            if let Some(ann) = ti.children().find(|n| n.tag_name().name() == "annotation") {
-                self.meta.annotation = self._get_text_with_notes(ann);
-            }
-            if let Some(seq) = ti.children().find(|n| n.tag_name().name() == "sequence") {
-                self.meta.series = seq.attribute("name").unwrap_or("").to_string();
-                self.meta.sequence_number = seq
-                    .attribute("number")
-                    .and_then(|n| n.parse::<i32>().ok())
-                    .unwrap_or(0);
-            }
-        }
-        
-        // Собираем сноски из body с name="notes"
-        for body in root.descendants().filter(|n| n.tag_name().name() == "body") {
-            if body.attribute("name") == Some("notes") {
-                for sec in body.children().filter(|n| n.tag_name().name() == "section") {
-                    if let Some(id) = sec.attribute("id") {
-                        let note_text = self._get_text_with_notes(sec);
-                        self.notes.insert(id.to_string(), note_text);
-                    }
-                }
-            }
-        }
-        
-        // Обрабатываем основной текст
-        for body in root.descendants().filter(|n| n.tag_name().name() == "body") {
-            if body.attribute("name") != Some("notes") {
-                self._walk(body, None);
-            }
-        }
-        
-        // Создаем главу "Сноски" в конце оглавления
-        if !self.notes.is_empty() {
-            let footnote_title = "Сноски".to_string();
-            self.paragraphs.push(Paragraph::Title(footnote_title.clone()));
-            
-            let mut footnote_numbers: Vec<(String, String)> = Vec::new();
-            
-            for (_, note_id) in &self.footnotes_locations {
-                if let Some(_text) = self.notes.get(note_id) {
-                    let mut found_num = None;
-                    for paragraph in &self.paragraphs {
-                        if let Paragraph::Body(body_text) = paragraph {
-                            if let Some(start) = body_text.find("^f:[") {
-                                if let Some(end) = body_text[start..].find(']') {
-                                    let num_str = &body_text[start+4..start+end];
-                                    if let Ok(num) = num_str.parse::<usize>() {
-                                        let note_idx = self.footnotes_locations
-                                            .iter()
-                                            .position(|(_, id)| id == note_id)
-                                            .map(|i| i + 1)
-                                            .unwrap_or(0);
-                                        if note_idx == num {
-                                            found_num = Some(num);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    let display_num = found_num.map(|n| n.to_string()).unwrap_or_else(|| {
-                        (self.footnotes_locations.iter().position(|(_, id)| id == note_id).unwrap_or(0) + 1).to_string()
-                    });
-                    
-                    footnote_numbers.push((display_num, note_id.clone()));
-                }
-            }
-            
-            footnote_numbers.sort_by(|a, b| {
-                let num_a = a.0.parse::<usize>().unwrap_or(0);
-                let num_b = b.0.parse::<usize>().unwrap_or(0);
-                num_a.cmp(&num_b)
-            });
-            
-            for (num, note_id) in footnote_numbers {
-                if let Some(text) = self.notes.get(&note_id) {
-                    let clean_text = text.trim();
-                    let display_text = if let Some(first_char) = clean_text.chars().next() {
-                        if first_char.is_ascii_digit() {
-                            let mut num_end = 0;
-                            for (i, c) in clean_text.chars().enumerate() {
-                                if !c.is_ascii_digit() && c != '.' && c != ')' && c != '(' && c != ' ' {
-                                    num_end = i;
-                                    break;
-                                }
-                            }
-                            if num_end > 0 {
-                                let rest = &clean_text[num_end..].trim_start();
-                                format!("{}. {}", num, rest)
-                            } else {
-                                format!("{}. {}", num, clean_text)
-                            }
-                        } else {
-                            format!("{}. {}", num, clean_text)
-                        }
-                    } else {
-                        format!("{}. {}", num, clean_text)
-                    };
-                    
-                    self.paragraphs.push(Paragraph::Body(display_text));
-                }
-            }
-            
-            let toc_index = self.paragraphs.len() - self.notes.len() - 1;
-            self.toc.push((footnote_title, toc_index));
-        }
-    }
-
-        fn _walk(&mut self, element: Node, current_mode: Option<&str>) {
-        for child in element.children() {
-            let tag = child.tag_name().name();
-            let next_mode = match tag {
-                "epigraph" => Some("epigraph"),
-                "cite" => Some("cite"),
-                "stanza" => Some("poem"),
-                "subtitle" => Some("subtitle"),
-                _ => current_mode,
-            };
-            match tag {
-                "title" => {
-                    let text = self._get_text_with_notes(child);
-                    if !text.is_empty() {
-                        if element.tag_name().name() == "section" {
-                            self.toc.push((text.clone(), self.paragraphs.len()));
-                        }
-                        self.paragraphs.push(Paragraph::Title(text));
-                    }
-                }
-"p" | "v" => {
-    let text = self._get_text_with_notes(child);
-    if !text.is_empty() {
-        if text.chars().all(|c| c == '*' || c.is_whitespace())
-            && text.matches('*').count() >= 3
-        {
-            self.paragraphs.push(Paragraph::Body(text));
-            continue;
-        }
-        let new_paragraph = match (tag, next_mode) {
-            ("p", Some("poem")) => Paragraph::Poem(text),
-            ("p", Some("epigraph")) => Paragraph::Epigraph(text),
-            ("p", Some("cite")) => Paragraph::Cite(text),
-            ("subtitle", _) | (_, Some("subtitle")) => Paragraph::Subtitle(text),
-            _ => Paragraph::Body(text),
-        };
-        
-        // Проверяем последний параграф
-        if let Some(last) = self.paragraphs.last() {
-            match last {
-                // Если последний был пустой строкой, заменяем его на новый параграф
-                Paragraph::Body(s) if s.is_empty() => {
-                    let last_idx = self.paragraphs.len() - 1;
-                    self.paragraphs[last_idx] = new_paragraph;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        self.paragraphs.push(new_paragraph);
-    }
-}
-                "text-author" => {
-                    let text = self._get_text_with_notes(child);
-                    if !text.is_empty() {
-                        self.paragraphs.push(Paragraph::Author(text));
-                        // НЕ добавляем пустую строку
-                    }
-                }
-                "subtitle" => {
-                    let text = self._get_text_with_notes(child);
-                    if !text.is_empty() {
-                        self.paragraphs.push(Paragraph::Subtitle(text));
-                    }
-                }
-                "epigraph" | "cite" | "stanza" => {
-                    self._walk(child, next_mode);
-                }
-                _ => {
-                    self._walk(child, next_mode);
-                }
-            }
-        }
-    }
-
-    fn _get_text_with_notes(&mut self, node: Node) -> String {
-        let mut text = String::new();
-        self._collect_text(node, &mut text, None);
-        text.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
-    fn _collect_text(&mut self, node: Node, text: &mut String, note_id_inherit: Option<&str>) {
-        if node.is_text() {
-            text.push_str(node.text().unwrap_or(""));
-            return;
-        }
-        if node.is_element() {
-            let tag = node.tag_name().name();
-
-            if tag == "a" {
-                let mut href = "";
-                for attr in node.attributes() {
-                    if attr.name().to_lowercase() == "href" {
-                        href = attr.value();
+        let mut raw_bytes = Vec::new();
+        if is_zip {
+            let mut archive = zip::ZipArchive::new(file)?;
+            let mut target_index = 0;
+            for i in 0..archive.len() {
+                if let Ok(zip_file) = archive.by_index(i) {
+                    let file_name = zip_file.name().to_lowercase();
+                    if file_name.ends_with(".fb2") {
+                        target_index = i;
                         break;
                     }
                 }
-                
-                let note_id = if href.starts_with('#') {
-                    &href[1..]
-                } else {
-                    ""
-                };
+            }
+            let mut zip_file = archive.by_index(target_index)?;
+            std::io::Read::read_to_end(&mut zip_file, &mut raw_bytes)?;
+        } else {
+            std::io::Read::read_to_end(&mut file, &mut raw_bytes)?;
+        };
 
-                if !note_id.is_empty() && self.notes.contains_key(note_id) {
-                    let current_paragraph_idx = self.paragraphs.len();
-                    if note_id_inherit.is_none() {
-                        self.footnotes_locations
-                            .push((current_paragraph_idx, note_id.to_string()));
-                    }
-                    
-                    let link_text = self._get_raw_text(node);
-                    let display_num = if link_text.chars().all(|c| c.is_ascii_digit()) && !link_text.is_empty() {
-                        link_text
-                    } else {
-                        let id_part = note_id.split('_').last().unwrap_or("");
-                        if id_part.chars().all(|c| c.is_ascii_digit()) && !id_part.is_empty() {
-                            id_part.to_string()
-                        } else {
-                            (self.footnotes_locations.len()).to_string()
-                        }
-                    };
-                    
-                    text.push_str(&format!(" ^f:[{}] ", display_num));
-                    return;
-                }
-                
-                for child in node.children() {
-                    self._collect_text(child, text, note_id_inherit);
-                }
-                return;
-            }
-            
-            // Добавляем пробелы только для p и v
-            if tag == "p" || tag == "v" {
-                text.push(' ');
-            }
-            
-            // Рекурсивно обрабатываем все дочерние элементы (включая emphasis)
-            for child in node.children() {
-                self._collect_text(child, text, note_id_inherit);
-            }
-            
-            if tag == "p" || tag == "v" {
-                text.push(' ');
+        let mut encoding_name = "utf-8".to_string();
+        let head_text = String::from_utf8_lossy(&raw_bytes[..std::cmp::min(raw_bytes.len(), 200)]).to_lowercase();
+        if let Some(enc_part) = head_text.split("encoding=").nth(1) {
+            if let Some(found_enc) = enc_part.split(|c| c == '"' || c == '\'').nth(1) {
+                encoding_name = found_enc.trim().to_string();
             }
         }
-    }
+        self.encoding = encoding_name.clone();
 
-    fn _get_raw_text(&self, node: Node) -> String {
-        node.descendants()
-            .filter(|n| n.is_text())
-            .map(|n| n.text().unwrap_or(""))
-            .collect::<Vec<_>>()
-            .join("")
-            .trim()
-            .to_string()
+        let utf8_string = if encoding_name != "utf-8" {
+            let label = encoding_name.as_bytes();
+            let coder = encoding_rs::Encoding::for_label(label).unwrap_or(encoding_rs::UTF_8);
+            let (res_cow, _, _) = coder.decode(&raw_bytes);
+            res_cow.into_owned()
+        } else {
+            String::from_utf8_lossy(&raw_bytes).into_owned()
+        };
+
+        let mut xml_reader = Reader::from_reader(utf8_string.as_bytes());
+        xml_reader.trim_text(true);
+
+        let mut buf = Vec::new();
+        let mut current_tag = String::new();
+
+        let (mut in_author, mut in_title, mut in_epigraph, mut in_poem) = (false, false, false, false);
+        let (mut in_cite, mut in_text_author, mut in_annotation, mut in_body) = (false, false, false, false);
+        let (mut in_footnote, mut in_body_notes, mut in_section, mut in_text_block) = (false, false, false, false);
+
+        let (mut current_footnote_id, mut current_footnote_text) = (String::new(), String::new());
+        let (mut author_first, mut author_last, mut current_para_text) = (String::new(), String::new(), String::new());
+
+        let mut current_section_titles: Vec<String> = Vec::new();
+        let mut footnote_map: HashMap<String, String> = HashMap::new();
+        let mut footnote_order: Vec<String> = Vec::new();
+        let mut pending_footnote_num: Option<usize> = None;
+        let mut in_link = false;
+
+        loop {
+            match xml_reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let raw_tag = String::from_utf8_lossy(e.name().as_ref()).to_string().to_lowercase();
+                    let tag_name = raw_tag.split(':').last().unwrap_or(&raw_tag).to_string();
+                    current_tag = tag_name.clone();
+
+                    match tag_name.as_str() {
+                        "author" => in_author = true,
+                        "title" => { in_title = true; in_text_block = true; current_para_text.clear(); }
+                        "epigraph" => { in_epigraph = true; in_text_block = true; }
+                        "poem" => { in_poem = true; in_text_block = true; }
+                        "cite" => { in_cite = true; in_text_block = true; }
+                        "text-author" => in_text_author = true,
+                        "annotation" => in_annotation = true,
+                        "p" | "v" | "subtitle" => { current_para_text.clear(); pending_footnote_num = None; }
+                        "section" => {
+                            in_section = true;
+                            current_section_titles.clear();
+                            let mut is_footnote_section = false;
+                            for attr in e.attributes().flatten() {
+                                if String::from_utf8_lossy(attr.key.as_ref()).to_lowercase() == "id" {
+                                    let id = String::from_utf8_lossy(&attr.value).into_owned();
+                                    if in_body_notes {
+                                        current_footnote_id = id; current_footnote_text.clear();
+                                        in_footnote = true; is_footnote_section = true;
+                                    }
+                                }
+                            }
+                            if !is_footnote_section { in_text_block = true; }
+                        }
+                        "body" => {
+                            let mut is_notes = false;
+                            for attr in e.attributes().flatten() {
+                                let key = String::from_utf8_lossy(attr.key.as_ref()).to_lowercase();
+                                let val = String::from_utf8_lossy(&attr.value).to_lowercase();
+                                if key == "name" && (val == "notes" || val == "footnotes" || val == "comments") {
+                                    in_body_notes = true; is_notes = true;
+                                }
+                            }
+                            if !is_notes { in_body = true; in_text_block = true; }
+                        }
+                        "a" => {
+                            in_link = true;
+                            let mut href = String::new();
+                            for attr in e.attributes().flatten() {
+                                let key = String::from_utf8_lossy(attr.key.as_ref()).to_lowercase();
+                                if key == "href" || key.ends_with("href") {
+                                    href = String::from_utf8_lossy(&attr.value).into_owned().replace('#', "");
+                                    break;
+                                }
+                            }
+                            if !href.is_empty() && !href.starts_with("http") {
+                                if !footnote_order.contains(&href) { footnote_order.push(href.clone()); }
+                                let note_num = footnote_order.iter().position(|id| id == &href).unwrap_or(0) + 1;
+                                pending_footnote_num = Some(note_num);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw_tag = String::from_utf8_lossy(e.name().as_ref()).to_string().to_lowercase();
+                    if raw_tag.split(':').last().unwrap_or(&raw_tag) == "sequence" {
+                        for attr in e.attributes().flatten() {
+                            match String::from_utf8_lossy(attr.key.as_ref()).to_lowercase().as_str() {
+                                "name" => self.meta.series = String::from_utf8_lossy(&attr.value).into_owned(),
+                                "number" => {
+                                    if let Ok(num_str) = std::str::from_utf8(&attr.value) {
+                                        self.meta.sequence_number = num_str.parse().unwrap_or(0);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw_tag = String::from_utf8_lossy(e.name().as_ref()).to_string().to_lowercase();
+                    let tag_name = raw_tag.split(':').last().unwrap_or(&raw_tag).to_string();
+
+                    match tag_name.as_str() {
+                        "a" => { in_link = false; }
+                        "author" => {
+                            in_author = false;
+                            let full_name = format!("{} {}", author_first, author_last).trim().to_string();
+                            if !full_name.is_empty() && self.meta.author.is_empty() { self.meta.author = full_name; }
+                        }
+                        "title" => { in_title = false; in_text_block = false; }
+                        "epigraph" => { in_epigraph = false; in_text_block = false; }
+                        "poem" => { in_poem = false; in_text_block = false; }
+                        "cite" => { in_cite = false; in_text_block = false; }
+                        "text-author" => in_text_author = false,
+                        "annotation" => in_annotation = false,
+                        "p" | "v" | "subtitle" => {
+                            let final_text = current_para_text.trim().to_string();
+                            if !final_text.is_empty() {
+                                if in_title {
+                                    if in_section && current_section_titles.len() < 3 && !final_text.contains(&self.meta.author) { 
+                                        current_section_titles.push(final_text.clone()); 
+                                    }
+                                    self.paragraphs.push(Paragraph::Title(final_text));
+                                } else if in_epigraph { self.paragraphs.push(Paragraph::Epigraph(final_text));
+                                } else if in_text_author { self.paragraphs.push(Paragraph::Author(final_text));
+                                } else if in_poem { self.paragraphs.push(Paragraph::Poem(final_text));
+                                } else if in_cite { self.paragraphs.push(Paragraph::Cite(final_text));
+                                } else if in_body || in_text_block { self.paragraphs.push(Paragraph::Body(final_text)); }
+                            }
+                            current_para_text.clear(); pending_footnote_num = None;
+                        }
+                        "section" => {
+                            in_section = false;
+                            if !current_section_titles.is_empty() {
+                                let title = current_section_titles.join(": ");
+                                self.toc.push((title, self.paragraphs.len()));
+                                current_section_titles.clear();
+                            }
+                            if in_footnote && !current_footnote_id.is_empty() {
+                                if !footnote_map.contains_key(&current_footnote_id) { footnote_order.push(current_footnote_id.clone()); }
+                                footnote_map.insert(current_footnote_id.clone(), current_footnote_text.trim().to_string());
+                                current_footnote_id.clear(); current_footnote_text.clear(); in_footnote = false;
+                            }
+                            in_text_block = false;
+                        }
+                        "body" => { in_body_notes = false; in_body = false; in_text_block = false; }
+                        _ => {}
+                    }
+                    current_tag.clear();
+                }
+                Ok(Event::Text(e)) => {
+                    let text = e.unescape().unwrap_or_default().into_owned();
+                    let cleaned_text = text.split_whitespace().collect::<Vec<&str>>().join(" ");
+
+                    if !cleaned_text.is_empty() && cleaned_text.len() < 10000 {
+                        if current_tag == "book-title" {
+                            if self.meta.title.is_empty() { self.meta.title = cleaned_text; }
+                        } else if in_footnote {
+                            current_footnote_text.push_str(&cleaned_text); current_footnote_text.push(' ');
+                        } else if in_author {
+                            match current_tag.as_str() {
+                                "first-name" => author_first = cleaned_text,
+                                "last-name" => author_last = cleaned_text,
+                                _ => {}
+                            }
+                        } else if in_annotation {
+                            if !self.meta.annotation.is_empty() { self.meta.annotation.push(' '); }
+                            self.meta.annotation.push_str(&cleaned_text);
+                        } else if in_text_block || in_body {
+                            if in_link {
+                                if let Some(num) = pending_footnote_num {
+                                    current_para_text = current_para_text.trim_end().to_string();
+                                    current_para_text.push_str(&format!(" ^f:[{}]", num));
+                                    pending_footnote_num = None;
+                                }
+                            } else {
+                                if !current_para_text.is_empty() && !current_para_text.ends_with(' ') {
+                                    let last_char = current_para_text.chars().last().unwrap_or(' ');
+                                    let first_char = cleaned_text.chars().next().unwrap_or(' ');
+
+                                    let last_is_alphanumeric = last_char.is_alphanumeric() || last_char == '?' || last_char == '!' || last_char == '.' || last_char == '"' || last_char == ')';
+                                    let first_is_alphanumeric = first_char.is_alphanumeric();
+
+                                    if last_is_alphanumeric && first_is_alphanumeric {
+                                        current_para_text.push(' ');
+                                    } else if first_char != '.' && first_char != ',' && first_char != '?' && first_char != '!' && first_char != ')' && first_char != ';' && first_char != ':' {
+                                        current_para_text.push(' ');
+                                    }
+                                }
+                                
+                                current_para_text.push_str(&cleaned_text);
+                                
+                                if let Some(num) = pending_footnote_num {
+                                    current_para_text = current_para_text.trim_end().to_string();
+                                    current_para_text.push_str(&format!(" ^f:[{}]", num));
+                                    pending_footnote_num = None;
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        for (order, id) in footnote_order.iter().enumerate() {
+            if let Some(text) = footnote_map.get(id) {
+                self.footnotes.push(FootnoteInfo {
+                    text: text.clone(),
+                    number: order + 1,
+                });
+            }
+        }
+
+        if !self.footnotes.is_empty() {
+            self.paragraphs.push(Paragraph::Title("Сноски".to_string()));
+            for footnote in &self.footnotes {
+                self.paragraphs.push(Paragraph::Body(format!("{}. {}", footnote.number, footnote.text)));
+            }
+            let toc_index = self.paragraphs.len() - self.footnotes.len() - 1;
+            self.toc.push(("Сноски".to_string(), toc_index));
+        }
+
+        if self.meta.title.is_empty() {
+            let mut file_name = self.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Неизвестная книга".to_string());
+            if file_name.to_lowercase().ends_with(".fb2") { file_name = file_name[..file_name.len() - 4].to_string(); }
+            self.meta.title = file_name;
+        }
+        if self.meta.author.is_empty() { self.meta.author = "Неизвестный Автор".to_string(); }
+
+        Ok(())
     }
 }

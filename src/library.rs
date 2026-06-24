@@ -1,6 +1,6 @@
 // src/library.rs
 use crate::fb2_parser::FB2Parser;
-use crate::i18n::{I18n, Language};
+use crate::i18n::Language;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -40,15 +40,13 @@ pub struct Library {
     pub scan_paths: Vec<PathBuf>,
     pub last_opened_book: Option<PathBuf>,
     pub books: HashMap<PathBuf, BookEntry>,
-    #[serde(with = "crate::config::theme_color_serde")]
+    #[serde(with = "crate::config::color_serde")]
     pub theme_color: ratatui::style::Color,
-    #[serde(with = "crate::config::popup_border_color_serde")]
+    #[serde(with = "crate::config::color_serde")]
     pub popup_border_color: ratatui::style::Color,
     pub language: Language,
     pub main_border: BorderStyle,
     pub popup_border: BorderStyle,
-    #[serde(default)]
-    pub first_run: bool, // Добавляем поле
 }
 
 impl Library {
@@ -74,7 +72,6 @@ impl Library {
             language: Language::Ru,
             main_border: BorderStyle::Rounded,
             popup_border: BorderStyle::Double,
-            first_run: true, // Помечаем как первый запуск
         }
     }
 
@@ -102,11 +99,7 @@ impl Library {
                         .unwrap_or("")
                         .to_lowercase();
                     if ext == "fb2" || ext == "zip" {
-                        let parser = FB2Parser::new(
-                            &p.to_path_buf(),
-                            &I18n::t(self.language, "unknown_title"),
-                            &I18n::t(self.language, "unknown_author"),
-                        );
+                        let parser = FB2Parser::new(&p.to_path_buf());
                         self.books.insert(p.to_path_buf(), BookEntry {
                             title: parser.meta.title.clone(),
                             author: parser.meta.author.clone(),

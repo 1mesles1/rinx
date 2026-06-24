@@ -1,31 +1,17 @@
 // src/book.rs
 use crate::fb2_parser::FB2Parser;
-use crate::i18n::{I18n, Language};
+use crate::i18n::Language;
 use crate::library::Library;
 use crate::layout;
 use reqwest::blocking::Client;
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use url::Url;
 
-pub fn load_book_data(
-    path: &PathBuf,
-    width: u16,
-    lang: Language,
-) -> (
-    FB2Parser,
-    Vec<String>,
-    Vec<(String, usize)>,
-    HashMap<usize, usize>,
-) {
-    let parser = FB2Parser::new(
-        path,
-        &I18n::t(lang, "unknown_title"),
-        &I18n::t(lang, "unknown_author"),
-    );
-    let (lines, toc, p_map) = layout::prepare_layout(&parser.paragraphs, width);
-    (parser, lines, toc, p_map)
+pub fn load_book_data(path: &PathBuf, width: u16) -> (FB2Parser, Vec<String>, Vec<(String, usize)>) {
+    let parser = FB2Parser::new(path);
+    let (lines, toc) = layout::prepare_layout(&parser.paragraphs, width);
+    (parser, lines, toc)
 }
 
 pub fn perform_search(lines: &[String], query: &str) -> Vec<usize> {
@@ -41,7 +27,7 @@ pub fn perform_search(lines: &[String], query: &str) -> Vec<usize> {
         .collect()
 }
 
-pub fn download_book(url: &str, library: &mut Library, lang: Language) -> Result<PathBuf, String> {
+pub fn download_book(url: &str, library: &mut Library, _lang: Language) -> Result<PathBuf, String> {
     let client = Client::new();
     let response = client.get(url).send().map_err(|e| format!("Ошибка загрузки: {}", e))?;
     
@@ -66,7 +52,6 @@ pub fn download_book(url: &str, library: &mut Library, lang: Language) -> Result
         format!("{}.fb2", filename)
     };
     
-    // Сохраняем в первый путь из scan_paths, или в текущую директорию
     let library_dir = if !library.scan_paths.is_empty() {
         library.scan_paths[0].clone()
     } else {
@@ -79,11 +64,7 @@ pub fn download_book(url: &str, library: &mut Library, lang: Language) -> Result
     let mut file = std::fs::File::create(&filepath).map_err(|e| format!("Ошибка создания файла: {}", e))?;
     file.write_all(&bytes).map_err(|e| format!("Ошибка записи: {}", e))?;
     
-    let parser = FB2Parser::new(
-        &filepath,
-        &I18n::t(lang, "unknown_title"),
-        &I18n::t(lang, "unknown_author"),
-    );
+    let parser = FB2Parser::new(&filepath);
     library.books.insert(filepath.clone(), crate::library::BookEntry {
         title: parser.meta.title.clone(),
         author: parser.meta.author.clone(),

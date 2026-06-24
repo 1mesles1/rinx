@@ -2,12 +2,13 @@
 use crate::app::{App, AppState};
 use crate::i18n::I18n;
 use crate::layout;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::*;
 use ratatui::widgets::block::Title;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
+use textwrap;
 
 fn border_style_to_border_type(style: crate::library::BorderStyle) -> BorderType {
     match style {
@@ -15,6 +16,146 @@ fn border_style_to_border_type(style: crate::library::BorderStyle) -> BorderType
         crate::library::BorderStyle::Double => BorderType::Double,
         crate::library::BorderStyle::Rounded => BorderType::Rounded,
     }
+}
+
+pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+// ---- Подсветка поиска (возвращает владеющие Span) ----
+fn highlight_search(
+    text: &str,
+    query: &str,
+    footnotes: &[crate::fb2_parser::FootnoteInfo],
+) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if query.is_empty() {
+        // Без поиска – только сноски
+        let mut last_pos = 0;
+        while let Some(start) = text[last_pos..].find('[') {
+            let abs_start = last_pos + start;
+            if let Some(end) = text[abs_start..].find(']') {
+                let abs_end = abs_start + end + 1;
+                let inner = &text[abs_start + 1..abs_start + end];
+                if inner.chars().all(|c| c.is_ascii_digit()) {
+                    if let Ok(num) = inner.parse::<usize>() {
+                        let is_footnote = footnotes.iter().any(|f| f.number == num);
+                        if abs_start > last_pos {
+                            spans.push(Span::raw(text[last_pos..abs_start].to_string()));
+                        }
+                        if is_footnote {
+                            spans.push(Span::styled(
+                                format!("[{}]", inner),
+                                Style::default().fg(Color::Yellow),
+                            ));
+                        } else {
+                            spans.push(Span::raw(format!("[{}]", inner)));
+                        }
+                        last_pos = abs_end;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+        if last_pos < text.len() {
+            spans.push(Span::raw(text[last_pos..].to_string()));
+        }
+        if spans.is_empty() {
+            spans.push(Span::raw(text.to_string()));
+        }
+        return spans;
+    }
+
+    // Поиск активен – регистронезависимый
+    let query_lower = query.to_lowercase();
+    let text_lower = text.to_lowercase();
+    let mut pos = 0;
+
+    while let Some(start) = text_lower[pos..].find(&query_lower) {
+        let abs_start = pos + start;
+        let abs_end = abs_start + query_lower.len();
+
+        let before = &text[pos..abs_start];
+        if !before.is_empty() {
+            spans.extend(process_text_segment(before, footnotes));
+        }
+
+        let matched = &text[abs_start..abs_end];
+        spans.push(Span::styled(
+            matched.to_string(),
+            Style::default().bg(Color::Red).fg(Color::Black), // Красный фон, чёрный текст
+        ));
+
+        pos = abs_end;
+    }
+
+    let after = &text[pos..];
+    if !after.is_empty() {
+        spans.extend(process_text_segment(after, footnotes));
+    }
+
+    if spans.is_empty() {
+        spans.push(Span::raw(text.to_string()));
+    }
+    spans
+}
+
+// ---- Обработка сегмента (сноски) ----
+fn process_text_segment(
+    segment: &str,
+    footnotes: &[crate::fb2_parser::FootnoteInfo],
+) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut last_pos = 0;
+    while let Some(start) = segment[last_pos..].find('[') {
+        let abs_start = last_pos + start;
+        if let Some(end) = segment[abs_start..].find(']') {
+            let abs_end = abs_start + end + 1;
+            let inner = &segment[abs_start + 1..abs_start + end];
+            if inner.chars().all(|c| c.is_ascii_digit()) {
+                if let Ok(num) = inner.parse::<usize>() {
+                    let is_footnote = footnotes.iter().any(|f| f.number == num);
+                    if abs_start > last_pos {
+                        spans.push(Span::raw(segment[last_pos..abs_start].to_string()));
+                    }
+                    if is_footnote {
+                        spans.push(Span::styled(
+                            format!("[{}]", inner),
+                            Style::default().fg(Color::Yellow),
+                        ));
+                    } else {
+                        spans.push(Span::raw(format!("[{}]", inner)));
+                    }
+                    last_pos = abs_end;
+                    continue;
+                }
+            }
+        }
+        break;
+    }
+    if last_pos < segment.len() {
+        spans.push(Span::raw(segment[last_pos..].to_string()));
+    }
+    if spans.is_empty() {
+        spans.push(Span::raw(segment.to_string()));
+    }
+    spans
 }
 
 pub fn render(f: &mut Frame, app: &mut App) {
@@ -40,14 +181,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let current_width = horizontal_chunks[1].width.saturating_sub(4);
     if app.lines.is_empty() || app.width_cache != current_width {
-        let (lines, toc, p_map) = layout::prepare_layout(&app.parser.paragraphs, current_width);
+        let (lines, toc) = layout::prepare_layout(&app.parser.paragraphs, current_width);
         app.lines = lines;
         app.toc = toc;
-        app.p_map = p_map;
         app.width_cache = current_width;
     }
 
-    // --- ОСНОВНОЙ БЛОК (текст книги) ---
     let block = Block::default()
         .title(
             Title::from(format!(
@@ -71,175 +210,88 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .style(Style::default().fg(app.library.theme_color));
 
     let view_height = chunks[0].height.saturating_sub(2) as usize;
-let display_lines: Vec<Line> = app
-    .lines
-    .iter()
-    .skip(app.scroll)
-    .take(view_height)
-    .map(|s| {
-        let is_header = s.starts_with("^:");
-        let base_text = if is_header { &s[2..] } else { s };
+    let query = app.search_query.clone();
+    let footnotes = &app.parser.footnotes;
 
-        let mut spans = Vec::new();
-        let mut last_pos = 0;
-        let text = base_text;
+    let display_lines: Vec<Line> = app
+        .lines
+        .iter()
+        .skip(app.scroll)
+        .take(view_height)
+        .map(|s| {
+            let is_header = s.starts_with("^:");
+            let text = if is_header { &s[2..] } else { s };
+            let text = text.replace("^f:", "");
 
-        while let Some(start) = text[last_pos..].find("^f:[") {
-            let abs_start = last_pos + start;
-            if let Some(end) = text[abs_start..].find(']') {
-                let abs_end = abs_start + end + 1;
-                if abs_start > last_pos {
-                    spans.push(Span::raw(text[last_pos..abs_start].to_string()));
-                }
-                let num_start = abs_start + 4;
-                let num_end = abs_start + end;
-                let num = &text[num_start..num_end];
-                spans.push(Span::styled(
-                    format!("[{}]", num),
-                    Style::default().fg(Color::Yellow).bold(),
-                ));
-                last_pos = abs_end;
-            } else {
-                break;
+            if is_header {
+                return Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(text, Style::default().fg(Color::Yellow)),
+                ]);
             }
-        }
-        if last_pos < text.len() {
-            spans.push(Span::raw(text[last_pos..].to_string()));
-        }
 
-        if spans.is_empty() {
-            let style = if is_header {
-                Style::default().fg(Color::Yellow).bold()
-            } else {
-                Style::default()
-            };
-            spans.push(Span::styled(base_text.to_string(), style));
-        } else if is_header {
-            for span in &mut spans {
-                span.style = Style::default().fg(Color::Yellow).bold();
-            }
-        }
-
-        if !app.search_query.is_empty() && !app.search_results.is_empty() {
-            let query = app.search_query.to_lowercase();
-            let mut result_spans = Vec::new();
-            for span in spans {
-                let text_low = span.content.to_lowercase();
-                if text_low.contains(&query) {
-                    let content = span.content.clone();
-                    let mut last_pos = 0;
-                    for (start, part) in text_low.match_indices(&query) {
-                        if start > last_pos {
-                            result_spans.push(Span::raw(
-                                content[last_pos..start].to_string(),
-                            ));
-                        }
-                        result_spans.push(Span::styled(
-                            content[start..start + part.len()].to_string(),
-                            Style::default().bg(Color::Red).fg(Color::White).bold(),
-                        ));
-                        last_pos = start + part.len();
-                    }
-                    if last_pos < content.len() {
-                        result_spans.push(Span::raw(content[last_pos..].to_string()));
-                    }
-                } else {
-                    result_spans.push(span);
-                }
-            }
-            spans = result_spans;
-        }
-
-        let mut final_spans = vec![Span::raw(" ")];
-        final_spans.extend(spans);
-        Line::from(final_spans)
-    })
-    .collect();
+            let spans = highlight_search(&text, &query, footnotes);
+            let mut final_spans = vec![Span::raw(" ")];
+            final_spans.extend(spans);
+            Line::from(final_spans)
+        })
+        .collect();
 
     let text_widget = Paragraph::new(display_lines).block(block).scroll((0, 0));
     f.render_widget(text_widget, horizontal_chunks[1]);
 
-    // --- НАСТРОЙКИ --- ширина 60%, высота 55%
-    if matches!(app.state, AppState::Config) || matches!(app.state, AppState::InputPath) || matches!(app.state, AppState::InputUrl) {
+    if matches!(app.state, AppState::Config)
+        || matches!(app.state, AppState::InputPath)
+        || matches!(app.state, AppState::InputUrl)
+    {
         render_settings(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- БИБЛИОТЕКА --- ширина 60%, высота 70%
     if let AppState::Library = app.state {
         render_library(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- СТАТУС-БАР ---
     render_status_bar(f, app, chunks[1]);
 
-    // --- ОГЛАВЛЕНИЕ --- ширина динамическая, высота 75%
     if app.show_toc && !app.toc.is_empty() {
         render_toc(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ИНФОРМАЦИЯ О КНИГЕ --- ширина 40%, высота 70%
     if app.show_info {
         render_book_info(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ПОМОЩЬ --- ширина 30%, высота 70%
     if app.show_help {
         render_help(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ПОИСК --- ширина 60%, высота 10%
     if app.is_searching && !matches!(app.state, AppState::Scanning) {
         render_search(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- СКАНИРОВАНИЕ --- ширина 40%, высота 10%
     if let AppState::Scanning = app.state {
         render_scanning(f, app);
     }
 
-    // --- ЗАКЛАДКИ --- ширина 50%, высота 50%
     if let AppState::Bookmarks = app.state {
         render_bookmarks(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- СНОСКА --- ширина и высота динамические, ограничены 80% и 60%
     if app.show_footnote {
         render_footnote(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ВВОД ПУТИ --- ширина поля 58%, отступы по 21%
     if let AppState::InputPath = app.state {
         render_input_path(f, app, popup_border_style, popup_border_type);
     }
 
-    // --- ВВОД ССЫЛКИ --- ширина поля 58%, отступы по 21%
     if let AppState::InputUrl = app.state {
         render_input_url(f, app, popup_border_style, popup_border_type);
     }
 }
 
-pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
 
-// ---- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТРИСОВКИ ----
-
-// ОКНО НАСТРОЕК — ШИРИНА: 60%  |  ВЫСОТА: 55%
+// ---- ОКНО НАСТРОЕК ----
 fn render_settings(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let area = centered_rect(60, 35, f.size());
@@ -252,21 +304,21 @@ fn render_settings(f: &mut Frame, app: &App, border_style: Style, border_type: B
     };
 
     let border_color_label = if app.library.popup_border_color == Color::White {
-        "Белые"
+        I18n::t(lang, "border_color_white")
     } else {
-        "Как тема"
+        I18n::t(lang, "border_color_theme")
     };
 
     let main_border_label = match app.library.main_border {
-        crate::library::BorderStyle::Plain => "Простые",
-        crate::library::BorderStyle::Double => "Двойные",
-        crate::library::BorderStyle::Rounded => "Скруглённые",
+        crate::library::BorderStyle::Plain => I18n::t(lang, "border_style_plain"),
+        crate::library::BorderStyle::Double => I18n::t(lang, "border_style_double"),
+        crate::library::BorderStyle::Rounded => I18n::t(lang, "border_style_rounded"),
     };
 
     let popup_border_label = match app.library.popup_border {
-        crate::library::BorderStyle::Plain => "Простые",
-        crate::library::BorderStyle::Double => "Двойные",
-        crate::library::BorderStyle::Rounded => "Скруглённые",
+        crate::library::BorderStyle::Plain => I18n::t(lang, "border_style_plain"),
+        crate::library::BorderStyle::Double => I18n::t(lang, "border_style_double"),
+        crate::library::BorderStyle::Rounded => I18n::t(lang, "border_style_rounded"),
     };
 
     let menu_items = vec![
@@ -276,9 +328,9 @@ fn render_settings(f: &mut Frame, app: &App, border_style: Style, border_type: B
         I18n::t(lang, "settings_save"),
         I18n::t(lang, "settings_download"),
         I18n::t(lang, "settings_lang").replace("{}", &lang_label),
-        I18n::t(lang, "settings_border_color").replace("{}", border_color_label),
-        I18n::t(lang, "settings_main_border").replace("{}", main_border_label),
-        I18n::t(lang, "settings_popup_border").replace("{}", popup_border_label),
+        I18n::t(lang, "settings_border_color").replace("{}", &border_color_label),
+        I18n::t(lang, "settings_main_border").replace("{}", &main_border_label),
+        I18n::t(lang, "settings_popup_border").replace("{}", &popup_border_label),
         I18n::t(lang, "settings_back"),
     ];
 
@@ -306,7 +358,7 @@ fn render_settings(f: &mut Frame, app: &App, border_style: Style, border_type: B
     f.render_widget(config_list, area);
 }
 
-// ОКНО БИБЛИОТЕКИ — ШИРИНА: 60%  |  ВЫСОТА: 70%
+// ---- ОКНО БИБЛИОТЕКИ ----
 fn render_library(f: &mut Frame, app: &mut App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let area = centered_rect(60, 70, f.size());
@@ -408,12 +460,11 @@ fn render_library(f: &mut Frame, app: &mut App, border_style: Style, border_type
                 .border_style(border_style),
         )
         .highlight_style(Style::default().bg(Color::Green).fg(Color::Black))
-        .highlight_symbol(">> ")
-        .scroll_padding(10);
+        .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut app.library_state);
 }
 
-// СТАТУС-БАР
+// ---- СТАТУС-БАР ----
 fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let lang = app.library.language;
     let terminal_height = f.size().height as usize;
@@ -452,9 +503,9 @@ fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     f.render_widget(
-Paragraph::new(
-    format!(" {}", I18n::t(lang, "status_width").replace("{:<3}", &app.width.to_string()) + &m_tag),
-)
+        Paragraph::new(
+            format!(" {}", I18n::t(lang, "status_width").replace("{:<3}", &app.width.to_string()) + &m_tag),
+        )
         .style(Style::default().bg(app.library.theme_color).fg(Color::Black)),
         status_chunks[0],
     );
@@ -474,7 +525,7 @@ Paragraph::new(
     );
 }
 
-// ОКНО ОГЛАВЛЕНИЯ — ШИРИНА: динамическая (width_pct)  |  ВЫСОТА: 75%
+// ---- ОКНО ОГЛАВЛЕНИЯ ----
 fn render_toc(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let max_toc_len = app
@@ -522,7 +573,7 @@ fn render_toc(f: &mut Frame, app: &App, border_style: Style, border_type: Border
     f.render_stateful_widget(toc_list, area, &mut state);
 }
 
-// ОКНО ИНФОРМАЦИИ О КНИГЕ — ШИРИНА: 40%  |  ВЫСОТА: 70%
+// ---- ОКНО ИНФОРМАЦИИ О КНИГЕ ----
 fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let area = centered_rect(40, 70, f.size());
@@ -532,14 +583,14 @@ fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: 
         Line::from(vec![
             Span::styled(
                 I18n::t(lang, "book_info_author"),
-                Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow),
+                Style::default().fg(Color::Yellow),
             ),
             Span::raw(&app.parser.meta.author),
         ]),
         Line::from(vec![
             Span::styled(
                 I18n::t(lang, "book_info_title"),
-                Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow),
+                Style::default().fg(Color::Yellow),
             ),
             Span::raw(&app.parser.meta.title),
         ]),
@@ -549,7 +600,7 @@ fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: 
         info_text.push(Line::from(vec![
             Span::styled(
                 I18n::t(lang, "book_info_series"),
-                Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow),
+                Style::default().fg(Color::Yellow),
             ),
             Span::raw(&app.parser.meta.series),
         ]));
@@ -558,7 +609,7 @@ fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: 
     info_text.push(Line::from("─".repeat(area.width as usize - 2)));
     info_text.push(Line::from(Span::styled(
         I18n::t(lang, "book_info_annotation"),
-        Style::default().add_modifier(Modifier::ITALIC),
+        Style::default(),
     )));
     info_text.push(Line::from(""));
 
@@ -572,7 +623,7 @@ fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: 
         let len = lines.len();
         for (i, line) in lines.into_iter().enumerate() {
             let justified = if i < len - 1 {
-                crate::layout::justify_line(line, target_w)
+                layout::justify_line(line, target_w)
             } else {
                 line.to_string()
             };
@@ -589,11 +640,11 @@ fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: 
                 .title_alignment(Alignment::Center)
                 .border_style(border_style),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(info_widget, area);
 }
 
-// ОКНО ПОМОЩИ — ШИРИНА: 30%  |  ВЫСОТА: 70%
+// ---- ОКНО ПОМОЩИ ----
 fn render_help(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let area = centered_rect(30, 70, f.size());
@@ -634,7 +685,7 @@ fn render_help(f: &mut Frame, app: &App, border_style: Style, border_type: Borde
             let style = if l.starts_with(" ") || l.is_empty() {
                 Style::default()
             } else {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow)
             };
             Line::from(vec![Span::raw(" "), Span::styled(l.clone(), style)])
         })
@@ -653,7 +704,7 @@ fn render_help(f: &mut Frame, app: &App, border_style: Style, border_type: Borde
     f.render_widget(help_widget, area);
 }
 
-// ОКНО ПОИСКА — ШИРИНА: 60%  |  ВЫСОТА: 10%
+// ---- ОКНО ПОИСКА ----
 fn render_search(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let area = centered_rect(60, 10, f.size());
@@ -669,7 +720,7 @@ fn render_search(f: &mut Frame, app: &App, border_style: Style, border_type: Bor
         Block::default()
             .title(Span::styled(
                 I18n::t(lang, "search_title"),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Yellow),
             ))
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
@@ -679,7 +730,7 @@ fn render_search(f: &mut Frame, app: &App, border_style: Style, border_type: Bor
     f.render_widget(search_block, area);
 }
 
-// ОКНО СКАНИРОВАНИЯ — ШИРИНА: 40%  |  ВЫСОТА: 10%
+// ---- ОКНО СКАНИРОВАНИЯ ----
 fn render_scanning(f: &mut Frame, app: &App) {
     let lang = app.library.language;
     let area = centered_rect(40, 10, f.size());
@@ -697,7 +748,7 @@ fn render_scanning(f: &mut Frame, app: &App) {
     );
 }
 
-// ОКНО ЗАКЛАДОК — ШИРИНА: 50%  |  ВЫСОТА: 50%
+// ---- ОКНО ЗАКЛАДОК ----
 fn render_bookmarks(f: &mut Frame, app: &mut App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let area = centered_rect(50, 50, f.size());
@@ -739,73 +790,85 @@ fn render_bookmarks(f: &mut Frame, app: &mut App, border_style: Style, border_ty
         .highlight_style(
             Style::default()
                 .bg(Color::Yellow)
-                .fg(Color::Black)
-                .add_modifier(Modifier::BOLD),
+                .fg(Color::Black),
         )
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
 }
 
-// ОКНО СНОСКИ — МАКСИМАЛЬНАЯ ШИРИНА: 80%  |  МАКСИМАЛЬНАЯ ВЫСОТА: 60%
-fn render_footnote(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
+// ---- ОКНО СНОСКИ ----
+fn render_footnote(f: &mut Frame, app: &mut App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let max_width_pct = 80;
     let max_height_pct = 60;
+    let min_width = 40;
+    let min_height = 5;
 
     let raw_lines: Vec<String> = app.current_footnote_text
         .split('\n')
         .map(|s| s.to_string())
         .collect();
 
-    let max_line_len = raw_lines.iter()
-        .map(|line| line.chars().count())
-        .max()
-        .unwrap_or(0);
-
-    let estimated_width = if max_line_len > 0 {
-        let min_width = 40;
-        let max_width = (f.size().width as usize * max_width_pct / 100).max(min_width);
-        let estimated = (max_line_len + 12).min(max_width);
-        estimated.max(min_width).min(max_width)
-    } else {
-        50
-    };
-
-    let width_pct = ((estimated_width as f32 / f.size().width as f32) * 100.0)
-        .min(max_width_pct as f32)
-        .max(30.0) as u16;
-
-    let target_w = (estimated_width as usize).saturating_sub(4);
-
+    let max_inner_width = (f.size().width as usize * max_width_pct / 100).max(min_width);
     let mut wrapped_lines: Vec<String> = Vec::new();
     for line in raw_lines {
-        if line.chars().count() > target_w {
-            let chars: Vec<char> = line.chars().collect();
-            let mut start = 0;
-            while start < chars.len() {
-                let end = (start + target_w).min(chars.len());
-                let part: String = chars[start..end].iter().collect();
-                wrapped_lines.push(part);
-                start = end;
-            }
+        if line.is_empty() {
+            wrapped_lines.push(String::new());
         } else {
-            wrapped_lines.push(line);
+            let wrapped = textwrap::fill(&line, max_inner_width);
+            for wline in wrapped.lines() {
+                wrapped_lines.push(wline.to_string());
+            }
         }
     }
 
+    app.footnote_wrapped_lines = wrapped_lines.clone();
+
+    let max_line_len = wrapped_lines.iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let desired_width = max_line_len + 4;
+    let max_width = (f.size().width as usize * max_width_pct / 100).max(min_width);
+    let final_width = desired_width.clamp(min_width, max_width);
+    let width_pct = ((final_width as f32 / f.size().width as f32) * 100.0)
+        .min(max_width_pct as f32)
+        .max((min_width as f32 / f.size().width as f32) * 100.0) as u16;
+
     let line_count = wrapped_lines.len();
-    let estimated_height = (line_count + 4).min(f.size().height as usize * max_height_pct / 100);
-    let height_pct = ((estimated_height as f32 / f.size().height as f32) * 100.0)
+    let desired_height = line_count + 2;
+    let max_height = (f.size().height as usize * max_height_pct / 100).max(min_height);
+    let final_height = desired_height.clamp(min_height, max_height);
+    let height_pct = ((final_height as f32 / f.size().height as f32) * 100.0)
         .min(max_height_pct as f32)
-        .max(10.0) as u16;
+        .max((min_height as f32 / f.size().height as f32) * 100.0) as u16;
 
     let area = centered_rect(width_pct, height_pct, f.size());
     f.render_widget(Clear, area);
 
-    let display_lines: Vec<Line> = wrapped_lines
+    app.footnote_visible_height = (area.height as usize).saturating_sub(2);
+
+    let inner_width = area.width.saturating_sub(4) as usize;
+    let mut final_lines: Vec<String> = Vec::new();
+    let raw_lines_orig = app.current_footnote_text.split('\n').map(|s| s.to_string()).collect::<Vec<_>>();
+    for line in raw_lines_orig {
+        if line.is_empty() {
+            final_lines.push(String::new());
+        } else {
+            let wrapped = textwrap::fill(&line, inner_width);
+            for wline in wrapped.lines() {
+                final_lines.push(wline.to_string());
+            }
+        }
+    }
+
+    app.footnote_wrapped_lines = final_lines.clone();
+
+    let display_lines: Vec<Line> = final_lines
         .iter()
         .skip(app.current_footnote_scroll)
-        .map(|l| Line::from(l.to_string()))
+        .map(|l| Line::from(format!("  {}", l)))
         .collect();
 
     let footnote_widget = Paragraph::new(display_lines)
@@ -822,7 +885,7 @@ fn render_footnote(f: &mut Frame, app: &App, border_style: Style, border_type: B
     f.render_widget(footnote_widget, area);
 }
 
-// ОКНО ВВОДА ПУТИ — левый отступ 21% | поле ввода 58% | правый отступ 21%
+// ---- ОКНО ВВОДА ПУТИ ----
 fn render_input_path(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let v_chunks = Layout::default()
@@ -859,7 +922,7 @@ fn render_input_path(f: &mut Frame, app: &App, border_style: Style, border_type:
     f.render_widget(input_widget, area);
 }
 
-// ОКНО ВВОДА ССЫЛКИ — левый отступ 21% | поле ввода 58% | правый отступ 21%
+// ---- ОКНО ВВОДА ССЫЛКИ ----
 fn render_input_url(f: &mut Frame, app: &App, border_style: Style, border_type: BorderType) {
     let lang = app.library.language;
     let v_chunks = Layout::default()
