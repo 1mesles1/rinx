@@ -12,7 +12,6 @@ pub fn prepare_layout(
     let w = width as usize;
 
     for (p_idx, p) in paragraphs.iter().enumerate() {
-        // Запоминаем, с какой строки начинается этот абзац
         paragraph_to_line.insert(p_idx, new_lines.len());
 
         match p {
@@ -34,10 +33,48 @@ pub fn prepare_layout(
                 new_lines.push("".to_string());
             }
 
+            Paragraph::Epigraph(text) => {
+                let lines: Vec<&str> = text.lines().collect();
+                if !lines.is_empty() {
+                    let options = Options::new(w.saturating_sub(4));
+                    for line in &lines {
+                        let wrapped = fill(line.trim(), &options);
+                        for wrapped_line in wrapped.lines() {
+                            new_lines.push(format!("  {}", wrapped_line));
+                        }
+                    }
+                }
+            }
+
+            Paragraph::Cite(text) => {
+                let lines: Vec<&str> = text.lines().collect();
+                if !lines.is_empty() {
+                    let options = Options::new(w.saturating_sub(6));
+                    for line in &lines {
+                        let wrapped = fill(line.trim(), &options);
+                        for wrapped_line in wrapped.lines() {
+                            new_lines.push(format!("    {}", wrapped_line));
+                        }
+                    }
+                }
+            }
+
+            Paragraph::Poem(text) => {
+                let lines: Vec<&str> = text.lines().collect();
+                if !lines.is_empty() {
+                    for line in &lines {
+                        let wrapped = fill(line.trim(), w.saturating_sub(4));
+                        for wrapped_line in wrapped.lines() {
+                            new_lines.push(format!("  {}", wrapped_line));
+                        }
+                    }
+                }
+            }
+
             Paragraph::Body(text) => {
                 let t = text.trim().to_string();
-                if !t.chars().any(|c| c.is_alphanumeric()) {
-                    continue; // Пропускаем пустые абзацы, НО НЕ ЗАБЫВАЕМ про map
+                if t.is_empty() {
+                    continue;
                 }
 
                 let options = Options::new(w);
@@ -45,7 +82,7 @@ pub fn prepare_layout(
                 let lines: Vec<_> = wrapped.lines().collect();
                 let len = lines.len();
 
-                for (i, line) in lines.into_iter().enumerate() {
+                for (i, line) in lines.iter().enumerate() {
                     let formatted = if i == 0 {
                         let first_line = format!("  {}", line);
                         if len == 1 {
@@ -65,16 +102,25 @@ pub fn prepare_layout(
                 }
             }
 
-            _ => {
-                let s = p.as_string_fallback().trim().to_string();
-                if s.is_empty() {
-                    continue;
-                }
-                let wrapped = fill(&s, w.saturating_sub(8));
+            Paragraph::Author(text) => {
+                let wrapped = fill(text.trim(), w.saturating_sub(8));
                 for line in wrapped.lines() {
                     new_lines.push(format!("    {}", line));
                 }
-                new_lines.push("".to_string());
+            }
+
+            Paragraph::Subtitle(text) => {
+                let wrapped = fill(text.trim(), w.saturating_sub(8));
+                for line in wrapped.lines() {
+                    new_lines.push(format!("    {}", line));
+                }
+            }
+
+            Paragraph::EmphasisBlock(text) => {
+                let wrapped = fill(text.trim(), w.saturating_sub(8));
+                for line in wrapped.lines() {
+                    new_lines.push(format!("    {}", line));
+                }
             }
         }
     }
@@ -111,23 +157,4 @@ pub fn justify_line(line: &str, width: usize) -> String {
         }
     }
     result
-}
-
-trait AsString {
-    fn as_string_fallback(&self) -> &str;
-}
-
-impl AsString for Paragraph {
-    fn as_string_fallback(&self) -> &str {
-        match self {
-            Paragraph::Title(s)
-            | Paragraph::Body(s)
-            | Paragraph::Poem(s)
-            | Paragraph::Epigraph(s)
-            | Paragraph::Cite(s)
-            | Paragraph::Subtitle(s)
-            | Paragraph::Author(s)
-            | Paragraph::EmphasisBlock(s) => s,
-        }
-    }
 }

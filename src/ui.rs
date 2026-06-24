@@ -71,90 +71,90 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .style(Style::default().fg(app.library.theme_color));
 
     let view_height = chunks[0].height.saturating_sub(2) as usize;
-    let display_lines: Vec<Line> = app
-        .lines
-        .iter()
-        .skip(app.scroll)
-        .take(view_height)
-        .map(|s| {
-            let is_header = s.starts_with("^:");
-            let base_text = if is_header { &s[2..] } else { s };
+let display_lines: Vec<Line> = app
+    .lines
+    .iter()
+    .skip(app.scroll)
+    .take(view_height)
+    .map(|s| {
+        let is_header = s.starts_with("^:");
+        let base_text = if is_header { &s[2..] } else { s };
 
-            let mut spans = Vec::new();
-            let mut last_pos = 0;
-            let text = base_text;
+        let mut spans = Vec::new();
+        let mut last_pos = 0;
+        let text = base_text;
 
-            while let Some(start) = text[last_pos..].find("^f:[") {
-                let abs_start = last_pos + start;
-                if let Some(end) = text[abs_start..].find(']') {
-                    let abs_end = abs_start + end + 1;
-                    if abs_start > last_pos {
-                        spans.push(Span::raw(text[last_pos..abs_start].to_string()));
-                    }
-                    let num_start = abs_start + 4;
-                    let num_end = abs_start + end;
-                    let num = &text[num_start..num_end];
-                    spans.push(Span::styled(
-                        format!("[{}]", num),
-                        Style::default().fg(Color::Yellow).bold(),
-                    ));
-                    last_pos = abs_end;
-                } else {
-                    break;
+        while let Some(start) = text[last_pos..].find("^f:[") {
+            let abs_start = last_pos + start;
+            if let Some(end) = text[abs_start..].find(']') {
+                let abs_end = abs_start + end + 1;
+                if abs_start > last_pos {
+                    spans.push(Span::raw(text[last_pos..abs_start].to_string()));
                 }
+                let num_start = abs_start + 4;
+                let num_end = abs_start + end;
+                let num = &text[num_start..num_end];
+                spans.push(Span::styled(
+                    format!("[{}]", num),
+                    Style::default().fg(Color::Yellow).bold(),
+                ));
+                last_pos = abs_end;
+            } else {
+                break;
             }
-            if last_pos < text.len() {
-                spans.push(Span::raw(text[last_pos..].to_string()));
-            }
+        }
+        if last_pos < text.len() {
+            spans.push(Span::raw(text[last_pos..].to_string()));
+        }
 
-            if spans.is_empty() {
-                let style = if is_header {
-                    Style::default().fg(Color::Yellow).bold()
-                } else {
-                    Style::default()
-                };
-                spans.push(Span::styled(base_text.to_string(), style));
-            } else if is_header {
-                for span in &mut spans {
-                    span.style = Style::default().fg(Color::Yellow).bold();
-                }
+        if spans.is_empty() {
+            let style = if is_header {
+                Style::default().fg(Color::Yellow).bold()
+            } else {
+                Style::default()
+            };
+            spans.push(Span::styled(base_text.to_string(), style));
+        } else if is_header {
+            for span in &mut spans {
+                span.style = Style::default().fg(Color::Yellow).bold();
             }
+        }
 
-            if !app.search_query.is_empty() && !app.search_results.is_empty() {
-                let query = app.search_query.to_lowercase();
-                let mut result_spans = Vec::new();
-                for span in spans {
-                    let text_low = span.content.to_lowercase();
-                    if text_low.contains(&query) {
-                        let content = span.content.clone();
-                        let mut last_pos = 0;
-                        for (start, part) in text_low.match_indices(&query) {
-                            if start > last_pos {
-                                result_spans.push(Span::raw(
-                                    content[last_pos..start].to_string(),
-                                ));
-                            }
-                            result_spans.push(Span::styled(
-                                content[start..start + part.len()].to_string(),
-                                Style::default().bg(Color::Red).fg(Color::White).bold(),
+        if !app.search_query.is_empty() && !app.search_results.is_empty() {
+            let query = app.search_query.to_lowercase();
+            let mut result_spans = Vec::new();
+            for span in spans {
+                let text_low = span.content.to_lowercase();
+                if text_low.contains(&query) {
+                    let content = span.content.clone();
+                    let mut last_pos = 0;
+                    for (start, part) in text_low.match_indices(&query) {
+                        if start > last_pos {
+                            result_spans.push(Span::raw(
+                                content[last_pos..start].to_string(),
                             ));
-                            last_pos = start + part.len();
                         }
-                        if last_pos < content.len() {
-                            result_spans.push(Span::raw(content[last_pos..].to_string()));
-                        }
-                    } else {
-                        result_spans.push(span);
+                        result_spans.push(Span::styled(
+                            content[start..start + part.len()].to_string(),
+                            Style::default().bg(Color::Red).fg(Color::White).bold(),
+                        ));
+                        last_pos = start + part.len();
                     }
+                    if last_pos < content.len() {
+                        result_spans.push(Span::raw(content[last_pos..].to_string()));
+                    }
+                } else {
+                    result_spans.push(span);
                 }
-                spans = result_spans;
             }
+            spans = result_spans;
+        }
 
-            let mut final_spans = vec![Span::raw(" ")];
-            final_spans.extend(spans);
-            Line::from(final_spans)
-        })
-        .collect();
+        let mut final_spans = vec![Span::raw(" ")];
+        final_spans.extend(spans);
+        Line::from(final_spans)
+    })
+    .collect();
 
     let text_widget = Paragraph::new(display_lines).block(block).scroll((0, 0));
     f.render_widget(text_widget, horizontal_chunks[1]);

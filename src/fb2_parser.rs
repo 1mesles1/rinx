@@ -1,4 +1,5 @@
-// src/fb2_parser.rs
+// src/fb2_parser.rs - исправленная версия с поддержкой text-author
+
 use anyhow::Result;
 use roxmltree::{Document, Node};
 use std::collections::HashMap;
@@ -6,6 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use zip::ZipArchive;
+
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct BookMeta {
@@ -16,6 +18,7 @@ pub struct BookMeta {
     pub publish: String,
     pub sequence_number: i32,
 }
+
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Paragraph {
@@ -28,6 +31,7 @@ pub enum Paragraph {
     Body(String),
     EmphasisBlock(String),
 }
+
 pub struct FB2Parser {
     pub paragraphs: Vec<Paragraph>,
     pub notes: HashMap<String, String>,
@@ -36,6 +40,7 @@ pub struct FB2Parser {
     pub encoding: String,
     pub footnotes_locations: Vec<(usize, String)>,
 }
+
 impl FB2Parser {
     pub fn new(filename: &PathBuf, unknown_title: &str, unknown_author: &str) -> Self {
         let mut parser = Self {
@@ -53,6 +58,7 @@ impl FB2Parser {
         let _ = parser._load_and_parse(filename, unknown_author);
         parser
     }
+
     fn _load_and_parse(&mut self, filename: &PathBuf, unknown_author: &str) -> Result<()> {
         let mut raw_data = Vec::new();
         if filename.to_string_lossy().to_lowercase().ends_with(".zip") {
@@ -66,7 +72,7 @@ impl FB2Parser {
                 let mut zip_file = archive.by_name(&name)?;
                 zip_file.read_to_end(&mut raw_data)?;
             }
-        } else if !filename.as_os_str().is_empty() {
+        } else if !filename.as_os_str().is_empty() && filename.exists() {
             let mut file = File::open(filename)?;
             file.read_to_end(&mut raw_data)?;
         }
@@ -86,6 +92,7 @@ impl FB2Parser {
         self._extract_all(doc.root(), unknown_author);
         Ok(())
     }
+
     fn _extract_all(&mut self, root: Node, unknown_author: &str) {
         // --- ПАРСИМ МЕТАДАННЫЕ КНИГИ ---
         if let Some(ti) = root
@@ -230,7 +237,8 @@ impl FB2Parser {
             self.toc.push((footnote_title, toc_index));
         }
     }
-    fn _walk(&mut self, element: Node, current_mode: Option<&str>) {
+
+        fn _walk(&mut self, element: Node, current_mode: Option<&str>) {
         for child in element.children() {
             let tag = child.tag_name().name();
             let next_mode = match tag {
@@ -250,28 +258,53 @@ impl FB2Parser {
                         self.paragraphs.push(Paragraph::Title(text));
                     }
                 }
-                "p" | "v" | "text-author" | "subtitle" => {
+"p" | "v" => {
+    let text = self._get_text_with_notes(child);
+    if !text.is_empty() {
+        if text.chars().all(|c| c == '*' || c.is_whitespace())
+            && text.matches('*').count() >= 3
+        {
+            self.paragraphs.push(Paragraph::Body(text));
+            continue;
+        }
+        let new_paragraph = match (tag, next_mode) {
+            ("p", Some("poem")) => Paragraph::Poem(text),
+            ("p", Some("epigraph")) => Paragraph::Epigraph(text),
+            ("p", Some("cite")) => Paragraph::Cite(text),
+            ("subtitle", _) | (_, Some("subtitle")) => Paragraph::Subtitle(text),
+            _ => Paragraph::Body(text),
+        };
+        
+        // Проверяем последний параграф
+        if let Some(last) = self.paragraphs.last() {
+            match last {
+                // Если последний был пустой строкой, заменяем его на новый параграф
+                Paragraph::Body(s) if s.is_empty() => {
+                    let last_idx = self.paragraphs.len() - 1;
+                    self.paragraphs[last_idx] = new_paragraph;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        self.paragraphs.push(new_paragraph);
+    }
+}
+                "text-author" => {
                     let text = self._get_text_with_notes(child);
                     if !text.is_empty() {
-                        if text.chars().all(|c| c == '*' || c.is_whitespace())
-                            && text.matches('*').count() >= 3
-                        {
-                            self.paragraphs.push(Paragraph::Body(text));
-                            continue;
-                        }
-                        let new_paragraph = match (tag, next_mode) {
-                            ("text-author", _) => Paragraph::Author(text),
-                            ("p", Some("poem")) => Paragraph::Poem(text),
-                            ("p", Some("epigraph")) => Paragraph::Epigraph(text),
-                            ("p", Some("cite")) => Paragraph::Cite(text),
-                            ("subtitle", _) | (_, Some("subtitle")) => Paragraph::Subtitle(text),
-                            _ => Paragraph::Body(text),
-                        };
-                        self.paragraphs.push(new_paragraph);
+                        self.paragraphs.push(Paragraph::Author(text));
+                        // НЕ добавляем пустую строку
                     }
                 }
-                "empty-line" => {
-                    self.paragraphs.push(Paragraph::Body("".to_string()));
+                "subtitle" => {
+                    let text = self._get_text_with_notes(child);
+                    if !text.is_empty() {
+                        self.paragraphs.push(Paragraph::Subtitle(text));
+                    }
+                }
+                "epigraph" | "cite" | "stanza" => {
+                    self._walk(child, next_mode);
                 }
                 _ => {
                     self._walk(child, next_mode);
@@ -279,11 +312,13 @@ impl FB2Parser {
             }
         }
     }
+
     fn _get_text_with_notes(&mut self, node: Node) -> String {
         let mut text = String::new();
         self._collect_text(node, &mut text, None);
         text.split_whitespace().collect::<Vec<_>>().join(" ")
     }
+
     fn _collect_text(&mut self, node: Node, text: &mut String, note_id_inherit: Option<&str>) {
         if node.is_text() {
             text.push_str(node.text().unwrap_or(""));
@@ -307,29 +342,27 @@ impl FB2Parser {
                     ""
                 };
 
-                if !note_id.is_empty() {
-                    if self.notes.contains_key(note_id) {
-                        let current_paragraph_idx = self.paragraphs.len();
-                        if note_id_inherit.is_none() {
-                            self.footnotes_locations
-                                .push((current_paragraph_idx, note_id.to_string()));
-                        }
-                        
-                        let link_text = self._get_raw_text(node);
-                        let display_num = if link_text.chars().all(|c| c.is_ascii_digit()) && !link_text.is_empty() {
-                            link_text
-                        } else {
-                            let id_part = note_id.split('_').last().unwrap_or("");
-                            if id_part.chars().all(|c| c.is_ascii_digit()) && !id_part.is_empty() {
-                                id_part.to_string()
-                            } else {
-                                (self.footnotes_locations.len()).to_string()
-                            }
-                        };
-                        
-                        text.push_str(&format!(" ^f:[{}] ", display_num));
-                        return;
+                if !note_id.is_empty() && self.notes.contains_key(note_id) {
+                    let current_paragraph_idx = self.paragraphs.len();
+                    if note_id_inherit.is_none() {
+                        self.footnotes_locations
+                            .push((current_paragraph_idx, note_id.to_string()));
                     }
+                    
+                    let link_text = self._get_raw_text(node);
+                    let display_num = if link_text.chars().all(|c| c.is_ascii_digit()) && !link_text.is_empty() {
+                        link_text
+                    } else {
+                        let id_part = note_id.split('_').last().unwrap_or("");
+                        if id_part.chars().all(|c| c.is_ascii_digit()) && !id_part.is_empty() {
+                            id_part.to_string()
+                        } else {
+                            (self.footnotes_locations.len()).to_string()
+                        }
+                    };
+                    
+                    text.push_str(&format!(" ^f:[{}] ", display_num));
+                    return;
                 }
                 
                 for child in node.children() {
@@ -338,10 +371,12 @@ impl FB2Parser {
                 return;
             }
             
+            // Добавляем пробелы только для p и v
             if tag == "p" || tag == "v" {
                 text.push(' ');
             }
             
+            // Рекурсивно обрабатываем все дочерние элементы (включая emphasis)
             for child in node.children() {
                 self._collect_text(child, text, note_id_inherit);
             }
@@ -351,6 +386,7 @@ impl FB2Parser {
             }
         }
     }
+
     fn _get_raw_text(&self, node: Node) -> String {
         node.descendants()
             .filter(|n| n.is_text())

@@ -47,6 +47,8 @@ pub struct Library {
     pub language: Language,
     pub main_border: BorderStyle,
     pub popup_border: BorderStyle,
+    #[serde(default)]
+    pub first_run: bool, // Добавляем поле
 }
 
 impl Library {
@@ -72,6 +74,7 @@ impl Library {
             language: Language::Ru,
             main_border: BorderStyle::Rounded,
             popup_border: BorderStyle::Double,
+            first_run: true, // Помечаем как первый запуск
         }
     }
 

@@ -34,10 +34,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut library = Library::load();
-    if library.books.is_empty() {
-        library.scan();
-    }
+    // Убираем mut, так как library не изменяется
+    let library = Library::load();
 
     let (filepath, start_state) = if args.len() > 1 {
         (std::path::PathBuf::from(&args[1]), app::AppState::Reader)
@@ -76,7 +74,7 @@ fn main() -> Result<()> {
 
     let mut app = App::new(
         start_state,
-        library,
+        library, // library передаётся по значению, mut не нужен
         parser,
         filepath,
         current_scroll,
