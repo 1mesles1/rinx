@@ -1,4 +1,4 @@
-# rink (v0.4.5)
+# rinx (v0.4.6)
 
 [English](#english) | [Русский](#русский)
 
@@ -6,7 +6,7 @@
 
 ## English
 
-**rink** is a lightweight, fast, and minimalist TUI (Terminal User Interface) e-book reader for `.fb2` files, written in Rust using the `ratatui` and `crossterm` libraries. Perfect for those who prefer to stay in the terminal and value high performance.
+**rinx** is a lightweight, fast, and minimalist TUI (Terminal User Interface) e-book reader for `.fb2` files, written in Rust using the `ratatui` and `crossterm` libraries. Perfect for those who prefer to stay in the terminal and value high performance.
 
 *This is a personal project built for learning Rust. If it compiles and runs—it's already a win.*
 
@@ -30,7 +30,7 @@
 
 ### Configuration
 Library data and layout settings are stored locally in:
-`~/.config/rink/library.json`
+`~/.config/rinx/library.json`
 
 ### Usage
 ```bash
@@ -38,16 +38,16 @@ Library data and layout settings are stored locally in:
 cargo run -- /path/to/book.fb2
 
 # Run compiled binary with a file
-rink /path/to/book.fb2
+rinx /path/to/book.fb2
 
 # Run library manager
-rink
+rinx
 ```
 
 ### Installation (Arch Linux)
 ```bash
-git clone https://github.com/1mesles1/rink
-cd rink
+git clone https://github.com/1mesles1/rinx
+cd rinx
 makepkg -si
 ```
 
@@ -63,7 +63,7 @@ makepkg -si
 
 ## Русский
 
-**rink** — легковесный, быстрый и минималистичный TUI-ридер для электронных книг в формате `.fb2`, написанный на Rust с использованием библиотек `ratatui` и `crossterm`. Идеально подходит для тех, кто предпочитает не покидать терминал и ценит высокую скорость работы.
+**rinx** — легковесный, быстрый и минималистичный TUI-ридер для электронных книг в формате `.fb2`, написанный на Rust с использованием библиотек `ratatui` и `crossterm`. Идеально подходит для тех, кто предпочитает не покидать терминал и ценит высокую скорость работы.
 
 *Это просто проект для изучения Rust. Если запускается — уже хорошо.*
 
@@ -83,7 +83,7 @@ makepkg -si
 
 ### Конфигурация
 База данных библиотеки и настройки конфигурации хранятся в:
-`~/.config/rink/library.json`
+`~/.config/rinx/library.json`
 
 ### Запуск
 ```bash
@@ -91,16 +91,16 @@ makepkg -si
 cargo run -- путь_к_файлу.fb2
 
 # Запуск скомпилированного бинарника с указанием книги
-rink путь_к_файлу.fb2
+rinx путь_к_файлу.fb2
 
 # Запуск библиотеки
-rink
+rinx
 ```
 
 ### Установка (Arch Linux)
 ```bash
-git clone https://github.com/1mesles1/rink
-cd rink
+git clone https://github.com/1mesles1/rinx
+cd rinx
 makepkg -si
 ```
 
