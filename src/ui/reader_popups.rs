@@ -1,7 +1,8 @@
+// src/ui/reader_popups.rs
 use crate::app::App;
 use crate::i18n::I18n;
 use crate::layout;
-use ratatui::layout::{Alignment};
+use ratatui::layout::Alignment;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::style::{Color, Style};
@@ -18,8 +19,8 @@ pub fn render_toc(f: &mut Frame, app: &App, border_style: Style, border_type: ra
         .unwrap_or(20);
     let desired_width = (max_toc_len + 8).max(40);
     let width_pct =
-        ((desired_width as f32 / f.size().width as f32) * 100.0).min(80.0) as u16;
-    let area = super::centered_rect(width_pct, 75, f.size());
+        ((desired_width as f32 / f.area().width as f32) * 100.0).min(80.0) as u16;
+    let area = super::centered_rect(width_pct, 75, f.area());
     f.render_widget(Clear, area);
 
     let max_w = (area.width as usize).saturating_sub(6);
@@ -39,25 +40,31 @@ pub fn render_toc(f: &mut Frame, app: &App, border_style: Style, border_type: ra
         })
         .collect();
 
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type)
+        .title(I18n::t(lang, "toc_title"))
+        .title_alignment(Alignment::Center)
+        .border_style(border_style);
+
+    let inner_area = block.inner(area);
+    let visible_height = inner_area.height as usize;
+    let total = items.len();
+    let selected = app.toc_index.min(total.saturating_sub(1));
     let mut state = ratatui::widgets::ListState::default();
-    state.select(Some(app.toc_index));
+    *state.offset_mut() = super::calculate_list_offset(total, selected, visible_height);
+    state.select(Some(selected));
+
     let toc_list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(border_type)
-                .title(I18n::t(lang, "toc_title"))
-                .title_alignment(Alignment::Center)
-                .border_style(border_style),
-        )
         .highlight_style(Style::default().bg(Color::Yellow).fg(Color::Black))
         .highlight_symbol(">> ");
-    f.render_stateful_widget(toc_list, area, &mut state);
+
+    f.render_stateful_widget(toc_list.block(block), area, &mut state);
 }
 
 pub fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_type: ratatui::widgets::BorderType) {
     let lang = app.library.language;
-    let area = super::centered_rect(40, 70, f.size());
+    let area = super::centered_rect(40, 70, f.area());
     f.render_widget(Clear, area);
 
     let mut info_text = vec![
@@ -127,7 +134,7 @@ pub fn render_book_info(f: &mut Frame, app: &App, border_style: Style, border_ty
 
 pub fn render_help(f: &mut Frame, app: &App, border_style: Style, border_type: ratatui::widgets::BorderType) {
     let lang = app.library.language;
-    let area = super::centered_rect(30, 70, f.size());
+    let area = super::centered_rect(30, 70, f.area());
     f.render_widget(Clear, area);
 
     let help_text = vec![
@@ -186,7 +193,7 @@ pub fn render_help(f: &mut Frame, app: &App, border_style: Style, border_type: r
 
 pub fn render_search(f: &mut Frame, app: &App, border_style: Style, border_type: ratatui::widgets::BorderType) {
     let lang = app.library.language;
-    let area = super::centered_rect(60, 10, f.size());
+    let area = super::centered_rect(60, 10, f.area());
     f.render_widget(Clear, area);
 
     let current_query = if matches!(app.state, crate::app::AppState::Library) {
@@ -221,7 +228,7 @@ pub fn render_footnote(f: &mut Frame, app: &mut App, border_style: Style, border
         .map(|s| s.to_string())
         .collect();
 
-    let max_inner_width = (f.size().width as usize * max_width_pct / 100).max(min_width);
+    let max_inner_width = (f.area().width as usize * max_width_pct / 100).max(min_width);
     let mut wrapped_lines: Vec<String> = Vec::new();
     for line in raw_lines {
         if line.is_empty() {
@@ -242,21 +249,21 @@ pub fn render_footnote(f: &mut Frame, app: &mut App, border_style: Style, border
         .unwrap_or(0);
 
     let desired_width = max_line_len + 4;
-    let max_width = (f.size().width as usize * max_width_pct / 100).max(min_width);
+    let max_width = (f.area().width as usize * max_width_pct / 100).max(min_width);
     let final_width = desired_width.clamp(min_width, max_width);
-    let width_pct = ((final_width as f32 / f.size().width as f32) * 100.0)
+    let width_pct = ((final_width as f32 / f.area().width as f32) * 100.0)
         .min(max_width_pct as f32)
-        .max((min_width as f32 / f.size().width as f32) * 100.0) as u16;
+        .max((min_width as f32 / f.area().width as f32) * 100.0) as u16;
 
     let line_count = wrapped_lines.len();
     let desired_height = line_count + 2;
-    let max_height = (f.size().height as usize * max_height_pct / 100).max(min_height);
+    let max_height = (f.area().height as usize * max_height_pct / 100).max(min_height);
     let final_height = desired_height.clamp(min_height, max_height);
-    let height_pct = ((final_height as f32 / f.size().height as f32) * 100.0)
+    let height_pct = ((final_height as f32 / f.area().height as f32) * 100.0)
         .min(max_height_pct as f32)
-        .max((min_height as f32 / f.size().height as f32) * 100.0) as u16;
+        .max((min_height as f32 / f.area().height as f32) * 100.0) as u16;
 
-    let area = super::centered_rect(width_pct, height_pct, f.size());
+    let area = super::centered_rect(width_pct, height_pct, f.area());
     f.render_widget(Clear, area);
 
     app.footnote_visible_height = (area.height as usize).saturating_sub(2);

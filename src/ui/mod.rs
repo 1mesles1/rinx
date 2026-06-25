@@ -1,9 +1,9 @@
+// src/ui/mod.rs
 use crate::app::{App, AppState};
 use crate::i18n::I18n;
 use crate::layout;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::*;
-use ratatui::widgets::block::Title;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -40,6 +40,16 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+pub fn calculate_list_offset(total: usize, selected: usize, height: usize) -> usize {
+    if total == 0 || total <= height {
+        return 0;
+    }
+    let half = height / 2;
+    let desired = selected.saturating_sub(half);
+    let max_offset = total.saturating_sub(height);
+    desired.min(max_offset)
 }
 
 fn highlight_search(
@@ -170,7 +180,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
-        .split(f.size());
+        .split(f.area());
 
     let text_area_width = app.width;
     let horizontal_chunks = Layout::default()
@@ -192,7 +202,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let block = Block::default()
         .title(
-            Title::from(format!(
+            Line::from(format!(
                 " {} ",
                 app.filename
                     .file_name()
@@ -202,7 +212,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             .alignment(Alignment::Center),
         )
         .title(
-            Title::from(format!(
+            Line::from(format!(
                 " {} ",
                 I18n::t(lang, "app_title").replace("{}", env!("CARGO_PKG_VERSION"))
             ))

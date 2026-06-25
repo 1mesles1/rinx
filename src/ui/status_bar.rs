@@ -1,3 +1,4 @@
+// src/ui/status_bar.rs
 use crate::app::App;
 use crate::i18n::I18n;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -7,7 +8,7 @@ use ratatui::style::{Color, Style};
 
 pub fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let lang = app.library.language;
-    let terminal_height = f.size().height as usize;
+    let terminal_height = f.area().height as usize;
     let visible_height = terminal_height.saturating_sub(3);
     let progress_pct = if app.lines.len() <= visible_height {
         100

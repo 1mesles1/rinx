@@ -630,8 +630,8 @@ fn handle_settings_enter(
                     .borders(ratatui::widgets::Borders::ALL)
                     .border_type(ratatui::widgets::BorderType::Rounded)
                     .style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
-                f.render_widget(block, f.size());
-                let area = crate::ui::centered_rect(40, 15, f.size());
+                f.render_widget(block, f.area());
+                let area = crate::ui::centered_rect(40, 15, f.area());
                 f.render_widget(ratatui::widgets::Clear, area);
                 let scan_msg = I18n::t(lang, "scanning_title") + "\n      ***      ";
                 f.render_widget(
