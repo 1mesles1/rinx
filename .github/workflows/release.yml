@@ -16,9 +16,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: rink
+            artifact_name: rinx
           - os: windows-latest
-            artifact_name: rink.exe
+            artifact_name: rinx.exe
 
     steps:
       - uses: actions/checkout@v5
