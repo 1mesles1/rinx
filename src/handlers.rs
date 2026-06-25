@@ -162,13 +162,24 @@ fn handle_reader_key(
             app.library.save();
             app.should_quit = true;
         }
-        // Закрытие поиска по Esc или q
-        KeyCode::Esc | KeyCode::Char('q') if app.is_searching => {
-            app.is_searching = false;
-            app.search_query.clear();
-            app.search_results.clear();
-            return Ok(());
-        }
+    // Закрытие поиска, если он активен
+    KeyCode::Esc | KeyCode::Char('q') if app.is_searching => {
+        app.is_searching = false;
+        app.search_query.clear();
+        app.search_results.clear();
+        return Ok(());
+    }
+
+    // НОВАЯ ВЕТВЬ: очистка поиска по Esc, когда поиск завершён
+    KeyCode::Esc if !app.is_searching
+        && !app.search_query.is_empty()
+        && !app.show_help && !app.show_info && !app.show_toc =>
+    {
+        app.search_query.clear();
+        app.search_results.clear();
+        app.current_search_idx = 0;
+        return Ok(());
+    }
         // Остальные клавиши
         KeyCode::Char('L') if !app.is_searching => {
             app.state = AppState::Library;

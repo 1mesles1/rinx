@@ -53,7 +53,7 @@ impl Library {
     pub fn load() -> Self {
         let path = dirs::config_dir()
             .unwrap_or_default()
-            .join("rink")
+            .join("rinx")
             .join("library.json");
         if let Ok(content) = std::fs::read_to_string(path) {
             serde_json::from_str(&content).unwrap_or_else(|_| Self::new())
@@ -76,7 +76,7 @@ impl Library {
     }
 
     pub fn save(&self) {
-        let dir = dirs::config_dir().unwrap_or_default().join("rink");
+        let dir = dirs::config_dir().unwrap_or_default().join("rinx");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("library.json");
         if let Ok(content) = serde_json::to_string_pretty(self) {
