@@ -38,7 +38,7 @@ impl I18n {
 
 pub const RU_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     // ====== ОСНОВНЫЕ ======
-    "app_title" => "rink v{}",
+    "app_title" => "rinx v{}",
     "loading" => "Загрузка...",
     "unknown_title" => "Неизвестно",
     "unknown_author" => "Неизвестный автор",
@@ -136,7 +136,7 @@ pub const RU_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     "footnotes_chapter" => "Сноски",
 
     // ====== ВЕРСИЯ ======
-    "version" => "rink {}",
+    "version" => "rinx {}",
     "help_version" => "? - помощь\no - настройки",
 
     // ====== НАСТРОЙКИ - ЗНАЧЕНИЯ ======
@@ -149,7 +149,7 @@ pub const RU_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
 
 pub const EN_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     // ====== ОСНОВНЫЕ ======
-    "app_title" => "rink v{}",
+    "app_title" => "rinx v{}",
     "loading" => "Loading...",
     "unknown_title" => "Unknown",
     "unknown_author" => "Unknown author",
@@ -247,7 +247,7 @@ pub const EN_STRINGS: phf::Map<&'static str, &'static str> = phf::phf_map! {
     "footnotes_chapter" => "Footnotes",
 
     // ====== ВЕРСИЯ ======
-    "version" => "rink {}",
+    "version" => "rinx {}",
     "help_version" => "? - help\no - settings",
 
     // ====== SETTINGS - VALUES ======
